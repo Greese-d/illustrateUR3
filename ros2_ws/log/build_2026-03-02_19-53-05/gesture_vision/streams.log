@@ -1,0 +1,19 @@
+[0.476s] Invoking command in '/home/caleb/ros2_ws/build/gesture_vision': PYTHONPATH=/home/caleb/ros2_ws/build/gesture_vision/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/caleb/ros2_ws/install/gesture_vision/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/caleb/ros2_ws/build/gesture_vision/build --no-deps symlink_data
+[0.685s] running develop
+[0.812s] running egg_info
+[0.813s] writing gesture_vision.egg-info/PKG-INFO
+[0.813s] writing dependency_links to gesture_vision.egg-info/dependency_links.txt
+[0.813s] writing entry points to gesture_vision.egg-info/entry_points.txt
+[0.813s] writing requirements to gesture_vision.egg-info/requires.txt
+[0.813s] writing top-level names to gesture_vision.egg-info/top_level.txt
+[0.814s] reading manifest file 'gesture_vision.egg-info/SOURCES.txt'
+[0.815s] writing manifest file 'gesture_vision.egg-info/SOURCES.txt'
+[0.816s] running build_ext
+[0.816s] Creating /home/caleb/ros2_ws/install/gesture_vision/lib/python3.10/site-packages/gesture-vision.egg-link (link to .)
+[0.817s] Installing gesture_recognizer script to /home/caleb/ros2_ws/install/gesture_vision/lib/gesture_vision
+[0.817s] Installing gesture_recognizer_nocvbridge script to /home/caleb/ros2_ws/install/gesture_vision/lib/gesture_vision
+[0.817s] Installing webcam_publisher script to /home/caleb/ros2_ws/install/gesture_vision/lib/gesture_vision
+[0.817s] 
+[0.817s] Installed /home/caleb/ros2_ws/build/gesture_vision
+[0.818s] running symlink_data
+[0.842s] Invoked command in '/home/caleb/ros2_ws/build/gesture_vision' returned '0': PYTHONPATH=/home/caleb/ros2_ws/build/gesture_vision/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/caleb/ros2_ws/install/gesture_vision/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/caleb/ros2_ws/build/gesture_vision/build --no-deps symlink_data
