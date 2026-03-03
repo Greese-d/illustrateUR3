@@ -1,5 +1,0 @@
-[console_scripts]
-gesture_recognizer = gesture_vision.gesture_recognizer:main
-gesture_recognizer_nocvbridge = gesture_vision.gesture_recognizer_nocvbridge:main
-webcam_publisher = gesture_vision.webcam_publisher:main
-
