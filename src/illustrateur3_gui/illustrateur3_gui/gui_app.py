@@ -15,6 +15,9 @@ class GuiApp:
         self.setup_styles()
         self.build_layout()
 
+        self.ros_node.state_callback_fn = self.on_state_update
+        self.update_ui_for_state("IDLE")
+
         self.root.after(50, self.poll_ros)
 
     def setup_styles(self):
@@ -29,9 +32,6 @@ class GuiApp:
         style.configure("Big.TButton", font=("Arial", 11), padding=8)
 
     def build_layout(self):
-        self.start_button.config(state="disabled")
-        self.stop_button.config(state="disabled")
-
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(1, weight=1)
         self.root.rowconfigure(2, weight=0)
@@ -167,6 +167,9 @@ class GuiApp:
         )
         self.estop_button.grid(row=1, column=1, padx=6, pady=6, sticky="ew")
 
+        self.start_button.config(state="disabled") #Enable these when i actually have something to draw
+        self.stop_button.config(state="disabled") #Enable these when i actually have something to draw
+
         # Status Panel
         status_frame = ttk.LabelFrame(
             bottom_frame,
@@ -209,6 +212,48 @@ class GuiApp:
         self.log_box.see("end")
         self.log_box.config(state="disabled")
 
+    def on_state_update(self, new_state):
+        self.state_label.config(text=f"System State: {new_state}")
+        self.status_text.config(text=f"Backend state changed to: {new_state}")
+        self.add_log(f"State update received: {new_state}")
+        self.update_ui_for_state(new_state)
+
+    def update_ui_for_state(self, state):
+        if state == "IDLE":
+            self.capture_button.config(state="normal")
+            self.start_button.config(state="disabled")
+            self.stop_button.config(state="disabled")
+
+        elif state == "PREVIEW_READY":
+            self.capture_button.config(state="normal")
+            self.start_button.config(state="normal")
+            self.stop_button.config(state="disabled")
+
+        elif state == "DRAWING":
+            self.capture_button.config(state="disabled")
+            self.start_button.config(state="disabled")
+            self.stop_button.config(state="normal")
+
+        elif state == "PROCESSING":
+            self.capture_button.config(state="disabled")
+            self.start_button.config(state="disabled")
+            self.stop_button.config(state="disabled")
+
+        elif state == "ESTOP":
+            self.capture_button.config(state="disabled")
+            self.start_button.config(state="disabled")
+            self.stop_button.config(state="disabled")
+
+        elif state == "ERROR":
+            self.capture_button.config(state="normal")
+            self.start_button.config(state="disabled")
+            self.stop_button.config(state="disabled")
+
+        else:
+            self.capture_button.config(state="disabled")
+            self.start_button.config(state="disabled")
+            self.stop_button.config(state="disabled")
+
     def on_capture(self):
         self.status_text.config(text="Capture requested.")
         self.add_log("Capture Portrait button pressed.")
@@ -225,10 +270,9 @@ class GuiApp:
         self.ros_node.get_logger().info("Stop Drawing requested")
 
     def on_estop(self):
-        self.state_label.config(text="System State: ESTOP")
-        self.status_text.config(text="Emergency stop activated.")
+        self.status_text.config(text="Emergency stop requested.")
         self.add_log("E-STOP button pressed.")
-        self.ros_node.get_logger().warn("Emergency stop activated")
+        self.ros_node.get_logger().warn("Emergency stop requested")
 
     def poll_ros(self):
         rclpy.spin_once(self.ros_node, timeout_sec=0.0)
