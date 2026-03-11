@@ -24,6 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'motion_node = ur3_motion.motion_node:main',
         ],
     },
+    
 )
