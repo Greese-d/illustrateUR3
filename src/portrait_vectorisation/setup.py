@@ -24,6 +24,7 @@ setup(
     entry_points={
         'console_scripts': [
             'camera_publisher = portrait_vectorisation.camera_publisher:main',
+            'img_processing_node = portrait_vectorisation.img_processing_node:main',
         ],
     },
 )
