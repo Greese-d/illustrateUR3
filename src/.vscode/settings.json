@@ -1,0 +1,19 @@
+{
+    "ROS2.distro": "humble",
+    "python.autoComplete.extraPaths": [
+        "/home/greese/intern_ws/install/yolo_ros/lib/python3.10/site-packages",
+        "/home/greese/intern_ws/install/pointcloud_stats/lib/python3.10/site-packages",
+        "/home/greese/41068_ws/install/yolov8_msgs/local/lib/python3.10/dist-packages",
+        "/home/greese/41068_ws/install/quadropted_msgs/local/lib/python3.10/dist-packages",
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ],
+    "python.analysis.extraPaths": [
+        "/home/greese/intern_ws/install/yolo_ros/lib/python3.10/site-packages",
+        "/home/greese/intern_ws/install/pointcloud_stats/lib/python3.10/site-packages",
+        "/home/greese/41068_ws/install/yolov8_msgs/local/lib/python3.10/dist-packages",
+        "/home/greese/41068_ws/install/quadropted_msgs/local/lib/python3.10/dist-packages",
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ]
+}
