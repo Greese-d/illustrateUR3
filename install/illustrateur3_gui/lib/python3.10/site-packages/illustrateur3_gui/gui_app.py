@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import ttk
 import rclpy
 
+#ros2 run illustrateur3_gui gui_main
+
 
 class GuiApp:
     def __init__(self, root, ros_node):
@@ -270,10 +272,9 @@ class GuiApp:
         self.ros_node.get_logger().info("Stop Drawing requested")
 
     def on_estop(self):
-        self.state_label.config(text="System State: ESTOP")
-        self.status_text.config(text="Emergency stop activated.")
+        self.status_text.config(text="Emergency stop requested.")
         self.add_log("E-STOP button pressed.")
-        self.ros_node.get_logger().warn("Emergency stop activated")
+        self.ros_node.get_logger().warn("Emergency stop requested")
 
     def poll_ros(self):
         rclpy.spin_once(self.ros_node, timeout_sec=0.0)

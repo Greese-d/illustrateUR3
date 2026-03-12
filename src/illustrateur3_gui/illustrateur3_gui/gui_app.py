@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import ttk
 import rclpy
 
+#ros2 run illustrateur3_gui gui_main
+
 
 class GuiApp:
     def __init__(self, root, ros_node):

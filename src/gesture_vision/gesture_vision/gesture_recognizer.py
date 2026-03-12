@@ -18,38 +18,50 @@ def finger_extended(tip, pip, mcp, wrist):
 
 
 def thumb_extended(lm):
-    """
-    More robust than a pure angle test:
-    - checks straightness at THUMB_IP
-    - AND checks that the tip is meaningfully far from the wrist
-    Hand-agnostic (no Left/Right label needed).
-    """
     wrist = lm[mp.solutions.hands.HandLandmark.WRIST]
-    mcp   = lm[mp.solutions.hands.HandLandmark.THUMB_MCP]
-    ip    = lm[mp.solutions.hands.HandLandmark.THUMB_IP]
-    tip   = lm[mp.solutions.hands.HandLandmark.THUMB_TIP]
+    thumb_cmc = lm[mp.solutions.hands.HandLandmark.THUMB_CMC]
+    thumb_mcp = lm[mp.solutions.hands.HandLandmark.THUMB_MCP]
+    thumb_ip  = lm[mp.solutions.hands.HandLandmark.THUMB_IP]
+    thumb_tip = lm[mp.solutions.hands.HandLandmark.THUMB_TIP]
 
-    # --- 1) angle at IP: MCP - IP - TIP ---
-    a = np.array([mcp.x, mcp.y])
-    b = np.array([ip.x,  ip.y])
-    c = np.array([tip.x, tip.y])
+    index_mcp = lm[mp.solutions.hands.HandLandmark.INDEX_FINGER_MCP]
+    pinky_mcp = lm[mp.solutions.hands.HandLandmark.PINKY_MCP]
+
+    # 1) Straightness at thumb IP joint
+    a = np.array([thumb_mcp.x, thumb_mcp.y])
+    b = np.array([thumb_ip.x, thumb_ip.y])
+    c = np.array([thumb_tip.x, thumb_tip.y])
 
     ba = a - b
     bc = c - b
-
     denom = (np.linalg.norm(ba) * np.linalg.norm(bc)) + 1e-9
     cosang = np.dot(ba, bc) / denom
     cosang = np.clip(cosang, -1.0, 1.0)
     angle = np.degrees(np.arccos(cosang))
 
-    # --- 2) distance from wrist (prevents "straight but tucked" thumb) ---
-    tip_d = np.linalg.norm(np.array([tip.x, tip.y]) - np.array([wrist.x, wrist.y]))
-    mcp_d = np.linalg.norm(np.array([mcp.x, mcp.y]) - np.array([wrist.x, wrist.y]))
+    # 2) Thumb tip farther out than IP and MCP
+    wrist_xy = np.array([wrist.x, wrist.y])
+    tip_d = np.linalg.norm(np.array([thumb_tip.x, thumb_tip.y]) - wrist_xy)
+    ip_d  = np.linalg.norm(np.array([thumb_ip.x, thumb_ip.y]) - wrist_xy)
+    mcp_d = np.linalg.norm(np.array([thumb_mcp.x, thumb_mcp.y]) - wrist_xy)
 
-    angle_ok = angle > 145.0
-    dist_ok  = tip_d > (mcp_d * 1.15)
+    extended_length = (tip_d > ip_d) and (tip_d > mcp_d * 1.05)
 
-    return angle_ok and dist_ok
+    # 3) Thumb should point away from the palm center
+    palm_center = np.array([
+        (wrist.x + index_mcp.x + pinky_mcp.x) / 3.0,
+        (wrist.y + index_mcp.y + pinky_mcp.y) / 3.0
+    ])
+
+    thumb_vec = np.array([thumb_tip.x, thumb_tip.y]) - np.array([thumb_mcp.x, thumb_mcp.y])
+    palm_vec  = palm_center - np.array([thumb_mcp.x, thumb_mcp.y])
+
+    # If dot product is negative, thumb points away from palm
+    away_from_palm = np.dot(thumb_vec, palm_vec) < 0
+
+    angle_ok = angle > 130.0
+
+    return angle_ok and extended_length and away_from_palm
 
 
 class GestureRecognizer(Node):
@@ -91,13 +103,11 @@ class GestureRecognizer(Node):
             f"Subscribing to {image_topic}, publishing gestures on {gesture_topic} (hold_time={self.hold_time}s)"
         )
 
-    def classify(self, hand_lms):
+    def classify(self, hand_lms, handedness=None):
         lm = hand_lms.landmark
         wrist = lm[self.mp_hands.HandLandmark.WRIST]
 
         thumb = thumb_extended(lm)
-
-        print("THUMB:", "OPEN" if thumb else "CLOSED")
 
         idx = finger_extended(
             lm[self.mp_hands.HandLandmark.INDEX_FINGER_TIP],
@@ -127,20 +137,17 @@ class GestureRecognizer(Node):
         # Count only index..pinky separately so thumb noise doesn't break OPEN_PALM/FIST
         n4 = sum(1 for e in [idx, mid, ring, pinky] if e)
 
-        # Keep THUMBS_UP strict: thumb only (other 4 not extended)
         if thumb and n4 == 0:
-            # Optional "upward" direction check (uncomment if you want):
-            # tip = lm[self.mp_hands.HandLandmark.THUMB_TIP]
-            # ip  = lm[self.mp_hands.HandLandmark.THUMB_IP]
-            # if tip.y < ip.y - 0.02:
-            #     return "THUMBS_UP"
-            # else:
-            #     return "UNKNOWN"
-            return "THUMBS_UP"
+            tip = lm[self.mp_hands.HandLandmark.THUMB_TIP]
+            ip  = lm[self.mp_hands.HandLandmark.THUMB_IP]
+
+            # In image coordinates, smaller y means higher in image
+            if tip.y < ip.y - 0.03:
+                return "THUMBS_UP"
 
         # OPEN_PALM doesn't depend on thumb (more stable)
         if n4 == 4:
-            return "OPEN_PALM"
+            return "OPEN_HAND"
 
         # FIST requires none of the 5 extended (stable)
         if n4 == 0 and (not thumb):
@@ -172,7 +179,10 @@ class GestureRecognizer(Node):
         gesture = "NONE"
         if results.multi_hand_landmarks:
             hand_lms = results.multi_hand_landmarks[0]
-            gesture = self.classify(hand_lms)
+            handedness = None
+            if results.multi_handedness:
+                handedness = results.multi_handedness[0].classification[0].label
+            gesture = self.classify(hand_lms, handedness)
 
             # Optional debug drawing
             if self.publish_debug and self.debug_pub is not None:
