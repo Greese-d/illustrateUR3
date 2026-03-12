@@ -10,7 +10,6 @@ setup.py
 ../../build/gesture_vision/gesture_vision.egg-info/zip-safe
 gesture_vision/__init__.py
 gesture_vision/gesture_recognizer.py
-gesture_vision/gesture_recognizer_nocvbridge.py
 gesture_vision/webcam_publisher.py
 resource/gesture_vision
 test/test_copyright.py

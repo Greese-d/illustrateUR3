@@ -99,7 +99,7 @@ This assumes:
 - Virtual environment is at `~/venvs/mp_ros`
 - Package is already built
 
-You need **3 terminals**.
+You need **2 terminals**.
 
 ⚠ IMPORTANT: In ALL terminals, run this first:
 ```bash
@@ -133,20 +133,7 @@ source ~/venvs/mp_ros/bin/activate
 source /opt/ros/humble/setup.bash
 source ~/ros2_ws/install/setup.bash
 
-python -m gesture_vision.gesture_recognizer_nocvbridge
-```
-
-## 🟡 TERMINAL 3 — Monitor Gesture Output
-
-Copy and paste:
-```bash
-export ROS_DOMAIN_ID=0
-export ROS_LOCALHOST_ONLY=0
-
-source /opt/ros/humble/setup.bash
-source ~/ros2_ws/install/setup.bash
-
-ros2 topic echo /gesture
+python -m gesture_vision.gesture_recognizer
 ```
 
 ## 🛠 Build the Project

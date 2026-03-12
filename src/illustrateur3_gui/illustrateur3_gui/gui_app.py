@@ -1,8 +1,17 @@
 import tkinter as tk
 from tkinter import ttk
-import rclpy
+from PIL import Image as PILImage, ImageTk
 
-#ros2 run illustrateur3_gui gui_main
+import rclpy
+from rclpy.node import Node
+
+import numpy as np
+import cv2
+
+from sensor_msgs.msg import Image
+
+
+# ros2 run illustrateur3_gui gui_main
 
 
 class GuiApp:
@@ -14,10 +23,15 @@ class GuiApp:
         self.root.geometry("1200x750")
         self.root.minsize(1000, 650)
 
+        # keep a reference so Tkinter does not garbage-collect the image
+        self.camera_tk_image = None
+
         self.setup_styles()
         self.build_layout()
 
         self.ros_node.state_callback_fn = self.on_state_update
+        self.ros_node.camera_callback_fn = self.on_camera_frame
+
         self.update_ui_for_state("IDLE")
 
         self.root.after(50, self.poll_ros)
@@ -38,9 +52,7 @@ class GuiApp:
         self.root.rowconfigure(1, weight=1)
         self.root.rowconfigure(2, weight=0)
 
-        # =========================
         # Top Bar
-        # =========================
         top_frame = ttk.Frame(self.root, padding=12)
         top_frame.grid(row=0, column=0, sticky="ew")
         top_frame.columnconfigure(0, weight=1)
@@ -60,9 +72,7 @@ class GuiApp:
         )
         self.state_label.grid(row=0, column=1, sticky="e", padx=(20, 0))
 
-        # =========================
         # Main Content Area
-        # =========================
         content_frame = ttk.Frame(self.root, padding=(12, 0, 12, 12))
         content_frame.grid(row=1, column=0, sticky="nsew")
         content_frame.columnconfigure(0, weight=1)
@@ -85,8 +95,6 @@ class GuiApp:
             bg="#2b2b2b",
             fg="white",
             font=("Arial", 14),
-            width=40,
-            height=20,
             relief="ridge",
             bd=2
         )
@@ -108,16 +116,12 @@ class GuiApp:
             bg="#2b2b2b",
             fg="white",
             font=("Arial", 14),
-            width=40,
-            height=20,
             relief="ridge",
             bd=2
         )
         self.preview_placeholder.grid(row=0, column=0, sticky="nsew")
 
-        # =========================
         # Bottom Area
-        # =========================
         bottom_frame = ttk.Frame(self.root, padding=(12, 0, 12, 12))
         bottom_frame.grid(row=2, column=0, sticky="ew")
         bottom_frame.columnconfigure(0, weight=1)
@@ -169,8 +173,8 @@ class GuiApp:
         )
         self.estop_button.grid(row=1, column=1, padx=6, pady=6, sticky="ew")
 
-        self.start_button.config(state="disabled") #Enable these when i actually have something to draw
-        self.stop_button.config(state="disabled") #Enable these when i actually have something to draw
+        self.start_button.config(state="disabled")
+        self.stop_button.config(state="disabled")
 
         # Status Panel
         status_frame = ttk.LabelFrame(
@@ -276,6 +280,87 @@ class GuiApp:
         self.add_log("E-STOP button pressed.")
         self.ros_node.get_logger().warn("Emergency stop requested")
 
+    def on_camera_frame(self, frame_bgr):
+        # Resize to fit current label size
+        label_w = max(self.camera_placeholder.winfo_width(), 320)
+        label_h = max(self.camera_placeholder.winfo_height(), 240)
+
+        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+
+        h, w = frame_rgb.shape[:2]
+        scale = min(label_w / w, label_h / h)
+        new_w = max(1, int(w * scale))
+        new_h = max(1, int(h * scale))
+
+        resized = cv2.resize(frame_rgb, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+        pil_img = PILImage.fromarray(resized)
+        self.camera_tk_image = ImageTk.PhotoImage(image=pil_img)
+
+        self.camera_placeholder.config(
+            image=self.camera_tk_image,
+            text=""
+        )
+
     def poll_ros(self):
         rclpy.spin_once(self.ros_node, timeout_sec=0.0)
-        self.root.after(50, self.poll_ros)
+        self.root.after(30, self.poll_ros)
+
+
+class GuiRosNode(Node):
+    def __init__(self):
+        super().__init__("illustrateur3_gui_node")
+
+        self.state_callback_fn = None
+        self.camera_callback_fn = None
+
+        # Change this topic if you want raw camera instead:
+        # "/camera/image_raw"
+        self.camera_sub = self.create_subscription(
+            Image,
+            "/camera/image_raw",
+            self.camera_image_callback,
+            10
+        )
+
+        # Add your state/topic subscriptions here too
+
+    def camera_image_callback(self, msg: Image):
+        try:
+            frame_bgr = self.rosimg_to_bgr(msg)
+            if self.camera_callback_fn is not None:
+                self.camera_callback_fn(frame_bgr)
+        except Exception as e:
+            self.get_logger().warn(f"Failed to render camera image: {e}")
+
+    def rosimg_to_bgr(self, msg: Image):
+        enc = msg.encoding.lower()
+
+        if enc not in ("bgr8", "rgb8"):
+            raise RuntimeError(f"Unsupported image encoding: {msg.encoding}")
+
+        frame = np.frombuffer(msg.data, dtype=np.uint8).reshape((msg.height, msg.width, 3))
+
+        if enc == "rgb8":
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+        return frame
+
+
+def main():
+    rclpy.init()
+
+    ros_node = GuiRosNode()
+
+    root = tk.Tk()
+    app = GuiApp(root, ros_node)
+
+    try:
+        root.mainloop()
+    finally:
+        ros_node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()
