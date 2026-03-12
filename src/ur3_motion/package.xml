@@ -1,16 +1,21 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+
 <package format="3">
+
   <name>ur3_motion</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
-  <maintainer email="<hoangnam2862003@gmail.com">nam</maintainer>
+  <description>UR3 motion planning nodes</description>
+
+  <maintainer email="hoangnam2862003@gmail.com">nam</maintainer>
+
   <license>TODO: License declaration</license>
 
   <depend>rclpy</depend>
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
-  <depend>moveit_commander</depend>
+
+  <exec_depend>moveit_ros_planning_interface</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
@@ -20,4 +25,5 @@
   <export>
     <build_type>ament_python</build_type>
   </export>
+
 </package>
