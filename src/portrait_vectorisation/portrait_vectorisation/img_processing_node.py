@@ -61,6 +61,8 @@ class ImgProcessingNode(Node):
     def image_callback(self, msg):
         """Store the latest image from the camera."""
         self.latest_image = msg
+        self.capture_snapshot_callback(None, None)  # Automatically update snapshot with latest image
+        self.create_portrait_callback(None, None)  # Automatically update portrait preview with latest snapshot
 
     def capture_snapshot_callback(self, request, response):
         """Publish the latest image when service is called."""
