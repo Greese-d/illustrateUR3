@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'motion_node = ur3_motion.motion_node:main',
+            'calibration_node = ur3_motion.calibration_node:main',
         ],
     },
     
