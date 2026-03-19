@@ -11,7 +11,7 @@ def main(args=None):
     ros_node = GuiNode()
 
     root = tk.Tk()
-    app = GuiApp(root, ros_node)
+    GuiApp(root, ros_node)
 
     try:
         root.mainloop()
