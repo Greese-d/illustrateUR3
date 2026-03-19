@@ -3,6 +3,7 @@ from rclpy.node import Node
 
 from tf2_ros import Buffer, TransformListener
 from visualization_msgs.msg import Marker
+from scipy.spatial.transform import Rotation as R
 
 import numpy as np
 import json
@@ -33,11 +34,16 @@ class CalibrationNode(Node):
 
         self.marker_pub = self.create_publisher(Marker, "paper_marker", 10)
 
-        self.tcp_offset = np.array([0.0, 0.0, -0.12])
-        self.points = []
+        self.tcp_offset = 0.12
+
+        # FIX: always fixed size (P1,P2,P3)
+        self.points = [None, None, None]
+
+        self.current_index = None
+        self.preview_point = None
 
         self.last_key_time = 0
-        self.debounce_time = 0.5
+        self.debounce_time = 0.3
 
         self.show_menu()
         self.timer = self.create_timer(0.1, self.loop)
@@ -46,16 +52,27 @@ class CalibrationNode(Node):
         self.get_logger().info("""
 Calibration Started
 -------------------
-Move robot, THEN press key:
+1 → Edit P1
+2 → Edit P2
+3 → Edit P3
 
-1 → Save P1 (origin)
-2 → Save P2 (X direction)
-3 → Save P3 (Y direction)
+Move robot → press ENTER to confirm
 
-s → Compute & save
-r → Reset calibration
+r → Reset
 q → Quit
 """)
+
+    def transform_to_matrix(self, t, q):
+        T = np.eye(4)
+        T[0:3, 3] = [t.x, t.y, t.z]
+        rot = R.from_quat([q.x, q.y, q.z, q.w])
+        T[0:3, 0:3] = rot.as_matrix()
+        return T
+
+    def apply_tcp_offset(self, T):
+        T_offset = np.eye(4)
+        T_offset[2, 3] = self.tcp_offset
+        return T @ T_offset
 
     def get_pen_tip_position(self):
         try:
@@ -65,31 +82,18 @@ q → Quit
                 rclpy.time.Time()
             )
 
-            t = transform.transform.translation
-            tool0_pos = np.array([t.x, t.y, t.z])
+            T = self.transform_to_matrix(
+                transform.transform.translation,
+                transform.transform.rotation
+            )
 
-            return tool0_pos + self.tcp_offset
+            T_new = self.apply_tcp_offset(T)
+
+            return T_new[0:3, 3]
 
         except Exception as e:
             self.get_logger().warn(f"TF not ready: {e}")
             return None
-
-    def get_stable_position(self):
-        prev = self.get_pen_tip_position()
-        if prev is None:
-            return None
-
-        for _ in range(5):
-            time.sleep(0.1)
-            new = self.get_pen_tip_position()
-
-            if new is None:
-                continue
-
-            if np.linalg.norm(new - prev) > 1e-5:
-                return new
-
-        return prev
 
     def loop(self):
         key = get_key()
@@ -104,11 +108,33 @@ q → Quit
 
     def handle_key(self, key):
 
+        # select which point to edit
         if key in ["1", "2", "3"]:
-            self.save_point()
+            self.current_index = int(key) - 1
+            self.get_logger().info(f"Editing P{key} → move robot, press ENTER")
 
-        elif key == "s":
-            self.compute_calibration()
+        # confirm
+        elif key == "\r" or key == "\n":
+            if self.current_index is None:
+                self.get_logger().warn("Select point first (1/2/3)")
+                return
+
+            pos = self.get_pen_tip_position()
+            if pos is None:
+                return
+
+            # overwrite directly (NO append)
+            self.points[self.current_index] = pos
+
+            self.get_logger().info(
+                f"P{self.current_index+1} CONFIRMED: {pos}"
+            )
+
+            self.current_index = None
+
+            # auto visualize
+            if all(p is not None for p in self.points):
+                self.visualize_paper()
 
         elif key == "r":
             self.reset_calibration()
@@ -118,52 +144,48 @@ q → Quit
             self.destroy_node()
             rclpy.shutdown()
 
-    def save_point(self):
-
-        pos = self.get_stable_position()
-
-        if pos is None:
-            return
-
-        # Prevent duplicates
-        if len(self.points) > 0:
-            if np.linalg.norm(pos - self.points[-1]) < 0.02:
-                self.get_logger().warn("Point too close! Move further.")
-                return
-
-        if len(self.points) >= 3:
-            self.get_logger().warn("Already have 3 points (press 'r')")
-            return
-
-        self.points.append(pos)
-
-        label = f"P{len(self.points)}"
-        self.get_logger().info(f"{label} saved: {pos}")
-
-        # Show paper immediately after P3
-        if len(self.points) == 3:
-            self.visualize_paper()
+        # preview continuously
+        if self.current_index is not None:
+            pos = self.get_pen_tip_position()
+            if pos is not None:
+                self.get_logger().info(
+                    f"P{self.current_index+1} preview: {pos}"
+                )
 
     def visualize_paper(self):
 
         P1, P2, P3 = self.points
 
+        # X axis
         x_axis = P2 - P1
-        x_axis /= np.linalg.norm(x_axis)
+        x_norm = np.linalg.norm(x_axis)
+        if x_norm < 1e-6:
+            self.get_logger().error("P1 and P2 too close!")
+            return
+        x_axis /= x_norm
 
-        y_axis = P3 - P1
-        y_axis /= np.linalg.norm(y_axis)
+        # Y axis (orthogonalized)
+        y_raw = P3 - P1
+        y_proj = y_raw - np.dot(y_raw, x_axis) * x_axis
+        y_norm = np.linalg.norm(y_proj)
 
+        if y_norm < 1e-6:
+            self.get_logger().error("Invalid P3 (collinear with P1→P2)")
+            return
+
+        y_axis = y_proj / y_norm
+
+        # Z axis
         z_axis = np.cross(x_axis, y_axis)
         z_axis /= np.linalg.norm(z_axis)
 
         width = np.linalg.norm(P2 - P1)
-        height = np.linalg.norm(P3 - P1)
+        height = np.linalg.norm(y_raw)
 
         center = P1 + 0.5 * width * x_axis + 0.5 * height * y_axis
 
-        R = np.column_stack((x_axis, y_axis, z_axis))
-        q = self.rotation_matrix_to_quaternion(R)
+        R_mat = np.column_stack((x_axis, y_axis, z_axis))
+        quat = R.from_matrix(R_mat).as_quat()
 
         marker = Marker()
         marker.header.frame_id = "base_link"
@@ -178,10 +200,10 @@ q → Quit
         marker.pose.position.y = float(center[1])
         marker.pose.position.z = float(center[2])
 
-        marker.pose.orientation.x = q[0]
-        marker.pose.orientation.y = q[1]
-        marker.pose.orientation.z = q[2]
-        marker.pose.orientation.w = q[3]
+        marker.pose.orientation.x = quat[0]
+        marker.pose.orientation.y = quat[1]
+        marker.pose.orientation.z = quat[2]
+        marker.pose.orientation.w = quat[3]
 
         marker.scale.x = width
         marker.scale.y = height
@@ -190,49 +212,16 @@ q → Quit
         marker.color.r = 1.0
         marker.color.g = 1.0
         marker.color.b = 1.0
-        marker.color.a = 0.8
+        marker.color.a = 0.9
 
         self.marker_pub.publish(marker)
 
-        self.get_logger().info("🟦 Paper displayed in RViz")
-
-    def rotation_matrix_to_quaternion(self, R):
-        q = np.zeros(4)
-        trace = np.trace(R)
-
-        if trace > 0:
-            s = 0.5 / np.sqrt(trace + 1.0)
-            q[3] = 0.25 / s
-            q[0] = (R[2,1] - R[1,2]) * s
-            q[1] = (R[0,2] - R[2,0]) * s
-            q[2] = (R[1,0] - R[0,1]) * s
-        else:
-            if R[0,0] > R[1,1] and R[0,0] > R[2,2]:
-                s = 2.0 * np.sqrt(1.0 + R[0,0] - R[1,1] - R[2,2])
-                q[3] = (R[2,1] - R[1,2]) / s
-                q[0] = 0.25 * s
-                q[1] = (R[0,1] + R[1,0]) / s
-                q[2] = (R[0,2] + R[2,0]) / s
-            elif R[1,1] > R[2,2]:
-                s = 2.0 * np.sqrt(1.0 + R[1,1] - R[0,0] - R[2,2])
-                q[3] = (R[0,2] - R[2,0]) / s
-                q[0] = (R[0,1] + R[1,0]) / s
-                q[1] = 0.25 * s
-                q[2] = (R[1,2] + R[2,1]) / s
-            else:
-                s = 2.0 * np.sqrt(1.0 + R[2,2] - R[0,0] - R[1,1])
-                q[3] = (R[1,0] - R[0,1]) / s
-                q[0] = (R[0,2] + R[2,0]) / s
-                q[1] = (R[1,2] + R[2,1]) / s
-                q[2] = 0.25 * s
-
-        return q
+        self.get_logger().info("🟦 Paper displayed correctly")
 
     def reset_calibration(self):
-        self.points.clear()
-        self.last_key_time = 0
+        self.points = [None, None, None]
+        self.current_index = None
 
-        # delete marker
         marker = Marker()
         marker.header.frame_id = "base_link"
         marker.action = Marker.DELETE
@@ -241,36 +230,6 @@ q → Quit
 
         self.get_logger().info("Calibration reset")
         self.show_menu()
-
-    def compute_calibration(self):
-
-        if len(self.points) < 3:
-            self.get_logger().error("Need 3 points first!")
-            return
-
-        P1, P2, P3 = self.points
-
-        x_axis = (P2 - P1) / np.linalg.norm(P2 - P1)
-        y_axis = (P3 - P1) / np.linalg.norm(P3 - P1)
-        z_axis = np.cross(x_axis, y_axis)
-        z_axis /= np.linalg.norm(z_axis)
-
-        width = np.linalg.norm(P2 - P1)
-        height = np.linalg.norm(P3 - P1)
-
-        data = {
-            "origin": P1.tolist(),
-            "x_axis": x_axis.tolist(),
-            "y_axis": y_axis.tolist(),
-            "z_axis": z_axis.tolist(),
-            "width": float(width),
-            "height": float(height)
-        }
-
-        with open("paper_calibration.json", "w") as f:
-            json.dump(data, f, indent=4)
-
-        self.get_logger().info("Calibration saved!")
 
 
 def main():

@@ -29,13 +29,13 @@ class MotionNode(Node):
             end_effector_name=ur.end_effector_name(),
             group_name=ur.MOVE_GROUP_ARM,
         )
-        self.moveit2.max_velocity = 0.0025
-        self.moveit2.max_acceleration = 0.0025
+        self.moveit2.max_velocity = 0.1
+        self.moveit2.max_acceleration = 0.1
         self.fixed_orientation = [0.0, 1.0, 0.0, 0.0]   
         # Move to home position
-        # self.go_home()
+        self.go_home()
         # self.go_to_pose([0.408, 0.113, 0.312])
-        self.go_to_pose([0.408, -0.184, 0.312])
+        # self.go_to_pose([0.408, -0.184, 0.312])
         # Create subscriber to pen_path topic
         self.create_subscription(
             Path,
@@ -96,11 +96,12 @@ class MotionNode(Node):
     #         self.get_logger().info(f"Position: {pos}")
     #         self.get_logger().info(f"Orientation: {quat}")
     def go_home(self):
-        self.moveit2.move_to_pose(
-        position=[0.298, 0.113, 0.312],
-        quat_xyzw=self.fixed_orientation,
-        cartesian=True
-    )
+    #     self.moveit2.move_to_pose(
+    #     position=[0.298, 0.113, 0.312],
+    #     quat_xyzw=self.fixed_orientation,
+    #     cartesian=True
+    # )
+        self.moveit2.move_to_configuration([0.0, -1.57, 1.57, -1.57, -1.57, 1.57])
         self.moveit2.wait_until_executed()
     def go_to_pose(self, position):
         self.moveit2.move_to_pose(
