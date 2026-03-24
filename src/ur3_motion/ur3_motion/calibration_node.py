@@ -4,6 +4,7 @@ from rclpy.node import Node
 from tf2_ros import Buffer, TransformListener
 from visualization_msgs.msg import Marker
 from scipy.spatial.transform import Rotation as R
+from ament_index_python.packages import get_package_share_directory
 
 import numpy as np
 import json
@@ -11,8 +12,7 @@ import sys
 import termios
 import tty
 import time
-
-
+import os
 def get_key():
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
@@ -34,7 +34,7 @@ class CalibrationNode(Node):
 
         self.marker_pub = self.create_publisher(Marker, "paper_marker", 10)
 
-        self.tcp_offset = 0.12
+        self.tcp_offset = 0.12 # length of the pen ( from end-effector to pentip)
 
         # FIX: always fixed size (P1,P2,P3)
         self.points = [None, None, None]
@@ -50,17 +50,17 @@ class CalibrationNode(Node):
 
     def show_menu(self):
         self.get_logger().info("""
-Calibration Started
--------------------
-1 → Edit P1
-2 → Edit P2
-3 → Edit P3
+        Calibration Started
+        -------------------
+        1 → Edit P1
+        2 → Edit P2
+        3 → Edit P3
 
-Move robot → press ENTER to confirm
+        Move robot → press ENTER to confirm
 
-r → Reset
-q → Quit
-""")
+        r → Reset
+        q → Quit
+        """)
 
     def transform_to_matrix(self, t, q):
         T = np.eye(4)
@@ -106,8 +106,8 @@ q → Quit
             self.last_key_time = now
             self.handle_key(key)
 
+    # Handle key inputs for selecting points, confirming positions, resetting, and quitting
     def handle_key(self, key):
-
         # select which point to edit
         if key in ["1", "2", "3"]:
             self.current_index = int(key) - 1
@@ -151,7 +151,50 @@ q → Quit
                 self.get_logger().info(
                     f"P{self.current_index+1} preview: {pos}"
                 )
+    
+    # After visualizing, also save the calibration to a JSON file for later use
+    def get_workspace_data_path(self):
+        # current file path (inside install or build)
+        current_file = os.path.abspath(__file__)
 
+        # go up until we find workspace root (has 'install' and 'src')
+        path = current_file
+        while path != "/":
+            if os.path.exists(os.path.join(path, "src")) and \
+            os.path.exists(os.path.join(path, "install")):
+                return os.path.join(path, "data")
+            path = os.path.dirname(path)
+
+        # fallback (just in case)
+        return os.path.expanduser("~/data")
+    def save_to_json(self, P1, P2, P3, width, height, center, quat):
+        
+        data_dir = self.get_workspace_data_path()
+        os.makedirs(data_dir, exist_ok=True)
+         #  File path
+        json_path = os.path.join(data_dir, "paper_calibration.json")
+
+        data = {
+            "P1": P1.tolist(),
+            "P2": P2.tolist(),
+            "P3": P3.tolist(),
+            "width": float(width),
+            "height": float(height),
+            "center": center.tolist(),
+            "orientation": {
+                "x": float(quat[0]),
+                "y": float(quat[1]),
+                "z": float(quat[2]),
+                "w": float(quat[3]),
+            }
+        }
+
+        with open(json_path, "w") as f:
+            json.dump(data, f, indent=4)
+
+        self.get_logger().info(f"Saved to {json_path}")
+    
+    # Visualize the paper as a marker in RViz based on the three points
     def visualize_paper(self):
 
         P1, P2, P3 = self.points
@@ -215,8 +258,8 @@ q → Quit
         marker.color.a = 0.9
 
         self.marker_pub.publish(marker)
-
         self.get_logger().info("🟦 Paper displayed correctly")
+        self.save_to_json(P1, P2, P3, width, height, center, quat)
 
     def reset_calibration(self):
         self.points = [None, None, None]
