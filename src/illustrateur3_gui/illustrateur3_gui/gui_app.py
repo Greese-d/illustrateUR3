@@ -409,24 +409,45 @@ class GuiApp:
         self.root.after(30, self.poll_ros)
 
     def on_point_1(self):
+        self.ros_node.set_point_1
         self.status_text.config(text="Calibration Point 1 requested.")
         self.add_log("Calibration Point 1 button pressed.")
         self.ros_node.get_logger().info("Calibration Point 1 requested")
 
     def on_point_2(self):
+        self.ros_node.set_point_2
         self.status_text.config(text="Calibration Point 2 requested.")
         self.add_log("Calibration Point 2 button pressed.")
         self.ros_node.get_logger().info("Calibration Point 2 requested")
 
     def on_point_3(self):
+        self.ros_node.set_point_3
         self.status_text.config(text="Calibration Point 3 requested.")
         self.add_log("Calibration Point 3 button pressed.")
         self.ros_node.get_logger().info("Calibration Point 3 requested")
 
     def on_toggle_freedrive(self):
-        self.freedrive_on = not self.freedrive_on
-        state_text = "ON" if self.freedrive_on else "OFF"
-        self.freedrive_button.config(text=f"Free Drive: {state_text}")
-        self.status_text.config(text=f"Free Drive toggled {state_text}.")
-        self.add_log(f"Free Drive toggled {state_text}.")
-        self.ros_node.get_logger().info(f"Free Drive toggled {state_text}")
+        # send command to ROS
+        self.ros_node.toggle_freedrive()
+
+        # temporary feedback (optional)
+        self.status_text.config(text="Toggling Free Drive...")
+        self.add_log("Sent Free Drive toggle command.")
+        self.ros_node.get_logger().info("Sent Free Drive toggle command.")
+
+    def handle_calibration_status(self, msg_data: str):
+
+        try:
+            data = json.loads(msg_data)
+
+            if data.get("command") == "toggle_freedrive":
+                freedrive_on = data.get("freedrive_on", False)
+
+                state_text = "ON" if freedrive_on else "OFF"
+
+                self.freedrive_button.config(text=f"Free Drive: {state_text}")
+                self.status_text.config(text=f"Free Drive is now {state_text}")
+                self.add_log(f"Free Drive is now {state_text}")
+
+        except Exception as e:
+            print(f"Failed to parse calibration status: {e}")
