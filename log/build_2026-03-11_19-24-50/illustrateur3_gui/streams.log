@@ -1,0 +1,24 @@
+[0.711s] Invoking command in '/home/caleb/illustrateUR3/src/illustrateur3_gui': PYTHONPATH=/home/caleb/illustrateUR3/build/illustrateur3_gui/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/caleb/illustrateUR3/install/illustrateur3_gui/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/illustrateur3_gui build --build-base /home/caleb/illustrateUR3/build/illustrateur3_gui/build install --record /home/caleb/illustrateUR3/build/illustrateur3_gui/install.log --single-version-externally-managed install_data
+[0.916s] running egg_info
+[0.917s] writing ../../build/illustrateur3_gui/illustrateur3_gui.egg-info/PKG-INFO
+[0.918s] writing dependency_links to ../../build/illustrateur3_gui/illustrateur3_gui.egg-info/dependency_links.txt
+[0.918s] writing entry points to ../../build/illustrateur3_gui/illustrateur3_gui.egg-info/entry_points.txt
+[0.918s] writing requirements to ../../build/illustrateur3_gui/illustrateur3_gui.egg-info/requires.txt
+[0.918s] writing top-level names to ../../build/illustrateur3_gui/illustrateur3_gui.egg-info/top_level.txt
+[0.920s] reading manifest file '../../build/illustrateur3_gui/illustrateur3_gui.egg-info/SOURCES.txt'
+[0.921s] writing manifest file '../../build/illustrateur3_gui/illustrateur3_gui.egg-info/SOURCES.txt'
+[0.921s] running build
+[0.921s] running build_py
+[0.921s] copying illustrateur3_gui/gui_app.py -> /home/caleb/illustrateUR3/build/illustrateur3_gui/build/lib/illustrateur3_gui
+[0.921s] running install
+[0.922s] running install_lib
+[0.922s] copying /home/caleb/illustrateUR3/build/illustrateur3_gui/build/lib/illustrateur3_gui/gui_app.py -> /home/caleb/illustrateUR3/install/illustrateur3_gui/lib/python3.10/site-packages/illustrateur3_gui
+[0.923s] byte-compiling /home/caleb/illustrateUR3/install/illustrateur3_gui/lib/python3.10/site-packages/illustrateur3_gui/gui_app.py to gui_app.cpython-310.pyc
+[0.925s] running install_data
+[0.925s] running install_egg_info
+[0.927s] removing '/home/caleb/illustrateUR3/install/illustrateur3_gui/lib/python3.10/site-packages/illustrateur3_gui-0.0.0-py3.10.egg-info' (and everything under it)
+[0.927s] Copying ../../build/illustrateur3_gui/illustrateur3_gui.egg-info to /home/caleb/illustrateUR3/install/illustrateur3_gui/lib/python3.10/site-packages/illustrateur3_gui-0.0.0-py3.10.egg-info
+[0.928s] running install_scripts
+[0.946s] Installing gui_main script to /home/caleb/illustrateUR3/install/illustrateur3_gui/lib/illustrateur3_gui
+[0.947s] writing list of installed files to '/home/caleb/illustrateUR3/build/illustrateur3_gui/install.log'
+[0.980s] Invoked command in '/home/caleb/illustrateUR3/src/illustrateur3_gui' returned '0': PYTHONPATH=/home/caleb/illustrateUR3/build/illustrateur3_gui/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/caleb/illustrateUR3/install/illustrateur3_gui/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/illustrateur3_gui build --build-base /home/caleb/illustrateUR3/build/illustrateur3_gui/build install --record /home/caleb/illustrateUR3/build/illustrateur3_gui/install.log --single-version-externally-managed install_data
