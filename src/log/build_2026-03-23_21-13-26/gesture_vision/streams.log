@@ -1,0 +1,42 @@
+[0.938s] Invoking command in '/home/caleb/illustrateUR3/src/gesture_vision': PYTHONPATH=/home/caleb/illustrateUR3/src/build/gesture_vision/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/caleb/illustrateUR3/src/install/gesture_vision/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../build/gesture_vision build --build-base /home/caleb/illustrateUR3/src/build/gesture_vision/build install --record /home/caleb/illustrateUR3/src/build/gesture_vision/install.log --single-version-externally-managed install_data
+[1.145s] running egg_info
+[1.145s] creating ../build/gesture_vision/gesture_vision.egg-info
+[1.146s] writing ../build/gesture_vision/gesture_vision.egg-info/PKG-INFO
+[1.146s] writing dependency_links to ../build/gesture_vision/gesture_vision.egg-info/dependency_links.txt
+[1.146s] writing entry points to ../build/gesture_vision/gesture_vision.egg-info/entry_points.txt
+[1.146s] writing requirements to ../build/gesture_vision/gesture_vision.egg-info/requires.txt
+[1.146s] writing top-level names to ../build/gesture_vision/gesture_vision.egg-info/top_level.txt
+[1.147s] writing manifest file '../build/gesture_vision/gesture_vision.egg-info/SOURCES.txt'
+[1.149s] reading manifest file '../build/gesture_vision/gesture_vision.egg-info/SOURCES.txt'
+[1.150s] writing manifest file '../build/gesture_vision/gesture_vision.egg-info/SOURCES.txt'
+[1.150s] running build
+[1.150s] running build_py
+[1.150s] creating /home/caleb/illustrateUR3/src/build/gesture_vision/build
+[1.150s] creating /home/caleb/illustrateUR3/src/build/gesture_vision/build/lib
+[1.150s] creating /home/caleb/illustrateUR3/src/build/gesture_vision/build/lib/gesture_vision
+[1.151s] copying gesture_vision/webcam_publisher.py -> /home/caleb/illustrateUR3/src/build/gesture_vision/build/lib/gesture_vision
+[1.151s] copying gesture_vision/__init__.py -> /home/caleb/illustrateUR3/src/build/gesture_vision/build/lib/gesture_vision
+[1.151s] copying gesture_vision/gesture_recognizer.py -> /home/caleb/illustrateUR3/src/build/gesture_vision/build/lib/gesture_vision
+[1.151s] running install
+[1.152s] running install_lib
+[1.152s] creating /home/caleb/illustrateUR3/src/install/gesture_vision/lib/python3.10/site-packages/gesture_vision
+[1.152s] copying /home/caleb/illustrateUR3/src/build/gesture_vision/build/lib/gesture_vision/webcam_publisher.py -> /home/caleb/illustrateUR3/src/install/gesture_vision/lib/python3.10/site-packages/gesture_vision
+[1.152s] copying /home/caleb/illustrateUR3/src/build/gesture_vision/build/lib/gesture_vision/__init__.py -> /home/caleb/illustrateUR3/src/install/gesture_vision/lib/python3.10/site-packages/gesture_vision
+[1.153s] copying /home/caleb/illustrateUR3/src/build/gesture_vision/build/lib/gesture_vision/gesture_recognizer.py -> /home/caleb/illustrateUR3/src/install/gesture_vision/lib/python3.10/site-packages/gesture_vision
+[1.153s] byte-compiling /home/caleb/illustrateUR3/src/install/gesture_vision/lib/python3.10/site-packages/gesture_vision/webcam_publisher.py to webcam_publisher.cpython-310.pyc
+[1.153s] byte-compiling /home/caleb/illustrateUR3/src/install/gesture_vision/lib/python3.10/site-packages/gesture_vision/__init__.py to __init__.cpython-310.pyc
+[1.153s] byte-compiling /home/caleb/illustrateUR3/src/install/gesture_vision/lib/python3.10/site-packages/gesture_vision/gesture_recognizer.py to gesture_recognizer.cpython-310.pyc
+[1.155s] running install_data
+[1.155s] creating /home/caleb/illustrateUR3/src/install/gesture_vision/share/ament_index
+[1.155s] creating /home/caleb/illustrateUR3/src/install/gesture_vision/share/ament_index/resource_index
+[1.155s] creating /home/caleb/illustrateUR3/src/install/gesture_vision/share/ament_index/resource_index/packages
+[1.155s] copying resource/gesture_vision -> /home/caleb/illustrateUR3/src/install/gesture_vision/share/ament_index/resource_index/packages
+[1.155s] copying package.xml -> /home/caleb/illustrateUR3/src/install/gesture_vision/share/gesture_vision
+[1.155s] running install_egg_info
+[1.156s] Copying ../build/gesture_vision/gesture_vision.egg-info to /home/caleb/illustrateUR3/src/install/gesture_vision/lib/python3.10/site-packages/gesture_vision-0.0.0-py3.10.egg-info
+[1.157s] running install_scripts
+[1.175s] Installing gesture_recognizer script to /home/caleb/illustrateUR3/src/install/gesture_vision/lib/gesture_vision
+[1.175s] Installing gesture_recognizer_nocvbridge script to /home/caleb/illustrateUR3/src/install/gesture_vision/lib/gesture_vision
+[1.175s] Installing webcam_publisher script to /home/caleb/illustrateUR3/src/install/gesture_vision/lib/gesture_vision
+[1.175s] writing list of installed files to '/home/caleb/illustrateUR3/src/build/gesture_vision/install.log'
+[1.220s] Invoked command in '/home/caleb/illustrateUR3/src/gesture_vision' returned '0': PYTHONPATH=/home/caleb/illustrateUR3/src/build/gesture_vision/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/caleb/illustrateUR3/src/install/gesture_vision/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../build/gesture_vision build --build-base /home/caleb/illustrateUR3/src/build/gesture_vision/build install --record /home/caleb/illustrateUR3/src/build/gesture_vision/install.log --single-version-externally-managed install_data
