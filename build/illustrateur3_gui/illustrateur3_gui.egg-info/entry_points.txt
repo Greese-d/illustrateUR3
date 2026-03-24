@@ -1,3 +1,0 @@
-[console_scripts]
-gui_main = illustrateur3_gui.main:main
-
