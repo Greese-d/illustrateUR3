@@ -4,7 +4,9 @@ from rclpy.node import Node
 from tf2_ros import Buffer, TransformListener
 from visualization_msgs.msg import Marker
 from scipy.spatial.transform import Rotation as R
-from ament_index_python.packages import get_package_share_directory
+# from ament_index_python.packages import get_package_share_directory
+from pymoveit2 import MoveIt2
+from pymoveit2.robots import ur
 
 import numpy as np
 import json
@@ -13,6 +15,8 @@ import termios
 import tty
 import time
 import os
+from geometry_msgs.msg import Point
+from builtin_interfaces.msg import Duration
 def get_key():
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
@@ -25,10 +29,20 @@ def get_key():
 
 
 class CalibrationNode(Node):
-
     def __init__(self):
         super().__init__("calibration_node")
 
+        self.moveit2 = MoveIt2(
+            node=self,
+            joint_names=ur.joint_names(),
+            base_link_name=ur.base_link_name(),
+            end_effector_name=ur.end_effector_name(),
+            group_name=ur.MOVE_GROUP_ARM,
+        )
+        self.moveit2.max_velocity = 0.1
+        self.moveit2.max_acceleration = 0.1
+
+        # Get transformation data for new end effector (attached on pentip)
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
@@ -167,7 +181,7 @@ class CalibrationNode(Node):
 
         # fallback (just in case)
         return os.path.expanduser("~/data")
-    def save_to_json(self, P1, P2, P3, width, height, center, quat):
+    def save_to_json(self, P1, P2, P3, width, height, center, quat, x_axis, y_axis, z_axis):
         
         data_dir = self.get_workspace_data_path()
         os.makedirs(data_dir, exist_ok=True)
@@ -186,7 +200,10 @@ class CalibrationNode(Node):
                 "y": float(quat[1]),
                 "z": float(quat[2]),
                 "w": float(quat[3]),
-            }
+            },
+            "x_axis": x_axis.tolist(),
+            "y_axis": y_axis.tolist(),
+            "z_axis": z_axis.tolist()
         }
 
         with open(json_path, "w") as f:
@@ -258,8 +275,42 @@ class CalibrationNode(Node):
         marker.color.a = 0.9
 
         self.marker_pub.publish(marker)
-        self.get_logger().info("🟦 Paper displayed correctly")
-        self.save_to_json(P1, P2, P3, width, height, center, quat)
+        self.get_logger().info("Paper displayed correctly")
+        
+        # ===== AXES =====
+        axes = [
+            (x_axis, (1, 0, 0), 1),
+            (y_axis, (0, 1, 0), 2),
+            (z_axis, (0, 0, 1), 3),
+        ]
+        
+        for axis, color, mid in axes:
+            m = Marker()
+            m.header.frame_id = "base_link"
+            m.header.stamp = self.get_clock().now().to_msg()
+            m.ns = "axes"
+            m.id = mid
+            m.type = Marker.ARROW
+            m.action = Marker.ADD
+            m.lifetime = Duration(sec=0)
+        
+            m.points.append(self.to_point(center))
+            m.points.append(self.to_point(center + axis * 0.3))
+
+            m.scale.x = 0.03
+            m.scale.y = 0.06
+            m.scale.z = 0.1
+
+            m.color.r = float(color[0])
+            m.color.g = float(color[1])
+            m.color.b = float(color[2])
+            m.color.a = 1.0
+
+            self.marker_pub.publish(m)
+
+        self.get_logger().info("✅ Paper + XYZ axes shown")
+
+        self.save_to_json(P1, P2, P3, width, height, center, quat, x_axis, y_axis, z_axis)
 
     def reset_calibration(self):
         self.points = [None, None, None]
@@ -271,8 +322,15 @@ class CalibrationNode(Node):
         marker.id = 0
         self.marker_pub.publish(marker)
 
-        self.get_logger().info("Calibration reset")
+        self.get_logger().info("Calibration reset okeeeeeeah ")
         self.show_menu()
+
+    def to_point(self, p):
+        pt = Point()
+        pt.x = float(p[0])
+        pt.y = float(p[1])
+        pt.z = float(p[2])
+        return pt
 
 
 def main():
