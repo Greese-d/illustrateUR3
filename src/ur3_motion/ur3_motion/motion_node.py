@@ -4,10 +4,10 @@ from rclpy.node import Node
 from tf2_ros import Buffer, TransformListener
 from pymoveit2 import MoveIt2
 from pymoveit2.robots import ur
-
 from nav_msgs.msg import Path
 from std_msgs.msg import String
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Pose, Point
+
 import numpy as np
 import json
 import sys
@@ -15,6 +15,8 @@ import termios
 import tty
 import time
 import os
+from visualization_msgs.msg import Marker
+from visualization_msgs.msg import Marker
 class MotionNode(Node):
     def __init__(self):
         super().__init__("motion_node")
@@ -27,26 +29,27 @@ class MotionNode(Node):
             joint_names=ur.joint_names(),
             base_link_name=ur.base_link_name(),
             end_effector_name=ur.end_effector_name(),
-            group_name=ur.MOVE_GROUP_ARM,
+            group_name=ur.MOVE_GROUP_ARM,   
         )
-        self.moveit2.max_velocity = 0.05
-        self.moveit2.max_acceleration = 0.05
+        self.moveit2.max_velocity = 0.01
+        self.moveit2.max_acceleration = 0.01
         self.fixed_orientation = [0.0, 1.0, 0.0, 0.0]   
-        # self.timer = self.create_timer(2.0, self.start_drawing)
-        self.start_drawing()
-        # Move to home position
-        # self.go_home()
-        # self.go_to_pose([0.408, 0.113, 0.312])
-        # self.go_to_pose([0.408, -0.184, 0.312])
-        # Create subscriber to pen_path topic
+         # Create subscriber and publisher topic
         self.create_subscription(
             Path,
             "pen_path",
             self.pen_path_callback,
             10,
         )
-        # Create publisher for drawing status
+        self.marker_pub = self.create_publisher(Marker, "paper_marker", 10)
         self.status_pub = self.create_publisher(String, "/drawing/status", 10)
+
+        # Run the drawing function/other functions
+        self.start_drawing()
+        # self.go_home()
+
+       
+    #------------Load Calibration Data and Draw rectangle frame on paper--------------------------------
     # Extract calibration data from json file (rs2_ws/data/paper_calibration.json)
     def load_calibration(self):
         workspace = os.getcwd()  # assumes running from ~/rs2_ws
@@ -88,20 +91,68 @@ class MotionNode(Node):
         path = self.generate_rectangle(P1, x_axis, y_axis, width, height)
         self.get_logger().info("Drawing rectangle...")
         tcp_offset= 0.12
+        drawn_path=[]
         for point in path:
-            real_point = point - tcp_offset*z_axis
+            
+            if(z_axis[2]<0):
+                real_point = point - tcp_offset*z_axis
+            else:
+                real_point = point + tcp_offset*z_axis
+
+            drawn_path.append(point)
+            self.visualize_rectangle(drawn_path)
             self.moveit2.move_to_pose(
                 position=real_point.tolist(),
                 quat_xyzw=self.fixed_orientation,
                 cartesian=True
             )
             self.moveit2.wait_until_executed()
+        self.get_logger().info("Rectangle done")
 
-        self.get_logger().info("Rectangle done ✅")
+    def visualize_rectangle(self, path):
 
+        marker = Marker()
+        marker.header.frame_id = "base_link"
+        marker.header.stamp = self.get_clock().now().to_msg()
+
+        marker.ns = "rectangle"
+        marker.id = 10
+        marker.type = Marker.LINE_STRIP
+        marker.action = Marker.ADD
+
+        from builtin_interfaces.msg import Duration
+        marker.lifetime = Duration(sec=0)
+
+        marker.scale.x = 0.005
+
+        marker.color.r = 1.0
+        marker.color.g = 0.0
+        marker.color.b = 0.0
+        marker.color.a = 1.0
+
+        for p in path:
+            pt = Point()
+            pt.x = float(p[0])
+            pt.y = float(p[1])
+            pt.z = float(p[2])
+            marker.points.append(pt)
+
+        self.marker_pub.publish(marker)
+
+    #----------------------------Fundamental Functions----------------------------------------------
     def start_drawing(self):
         self.draw_rectangle()
         
+    
+    def go_home(self):
+    #     self.moveit2.move_to_pose(
+    #     position=[0.298, 0.113, 0.312],
+    #     quat_xyzw=self.fixed_orientation,
+    #     cartesian=True
+    # )
+        self.moveit2.move_to_configuration([0.0, -1.57, 1.57, -1.57, -1.57, 1.57])
+        self.moveit2.wait_until_executed()
+
     # Callback function for pen path subscriber
     def pen_path_callback(self, msg: Path):
         self.get_logger().info("Starting drawing...")
@@ -123,48 +174,6 @@ class MotionNode(Node):
         status_msg = String()
         status_msg.data = "completed"
         self.status_pub.publish(status_msg)
-
-    # def get_current_pose(self):
-    #     try:
-    #         transform = self.tf_buffer.lookup_transform(
-    #             "base_link",
-    #             "tool0",
-    #             rclpy.time.Time(),
-    #             timeout=rclpy.duration.Duration(seconds=1.0)  # 🔥 KEY FIX
-    #         )
-
-    #         t = transform.transform.translation
-    #         r = transform.transform.rotation
-
-    #         position = [t.x, t.y, t.z]
-    #         orientation = [r.x, r.y, r.z, r.w]
-
-    #         return position, orientation
-
-    #     except Exception as e:
-    #         self.get_logger().warn(f"TF not ready yet: {e}")
-    #         return None, None
-        
-    # def print_pose(self):
-    #     pos, quat = self.get_current_pose()
-    #     if pos is not None:
-    #         self.get_logger().info(f"Position: {pos}")
-    #         self.get_logger().info(f"Orientation: {quat}")
-    def go_home(self):
-    #     self.moveit2.move_to_pose(
-    #     position=[0.298, 0.113, 0.312],
-    #     quat_xyzw=self.fixed_orientation,
-    #     cartesian=True
-    # )
-        self.moveit2.move_to_configuration([0.0, -1.57, 1.57, -1.57, -1.57, 1.57])
-        self.moveit2.wait_until_executed()
-    def go_to_pose(self, position):
-        self.moveit2.move_to_pose(
-            position=position,
-            quat_xyzw=self.fixed_orientation,
-            cartesian=True
-        )
-        self.moveit2.wait_until_executed()
 
 
 def main():
