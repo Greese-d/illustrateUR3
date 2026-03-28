@@ -31,8 +31,8 @@ class MotionNode(Node):
             end_effector_name=ur.end_effector_name(),
             group_name=ur.MOVE_GROUP_ARM,   
         )
-        self.moveit2.max_velocity = 0.01
-        self.moveit2.max_acceleration = 0.01
+        self.moveit2.max_velocity = 0.1
+        self.moveit2.max_acceleration = 0.1
         self.fixed_orientation = [0.0, 1.0, 0.0, 0.0]   
          # Create subscriber and publisher topic
         self.create_subscription(
@@ -45,9 +45,8 @@ class MotionNode(Node):
         self.status_pub = self.create_publisher(String, "/drawing/status", 10)
 
         # Run the drawing function/other functions
+        self.go_home()
         self.start_drawing()
-        # self.go_home()
-
        
     #------------Load Calibration Data and Draw rectangle frame on paper--------------------------------
     # Extract calibration data from json file (rs2_ws/data/paper_calibration.json)
@@ -68,7 +67,16 @@ class MotionNode(Node):
         x_axis= np.array(data["x_axis"])
         y_axis= np.array(data["y_axis"])
         z_axis= np.array(data["z_axis"])
-        return P1, P2, P3, width, height, x_axis, y_axis, z_axis
+
+        orientation = data["orientation"]
+        quat = [
+            orientation["x"],
+            orientation["y"],
+            orientation["z"],
+            orientation["w"]
+            ]
+    
+        return P1, P2, P3, width, height, x_axis, y_axis, z_axis, quat
     def generate_rectangle(self, P1, x_axis, y_axis, width, height, offset=0.01):
 
         # rectangle dimensions
@@ -84,10 +92,10 @@ class MotionNode(Node):
         p3 = origin + w * x_axis + h * y_axis
         p4 = origin + h * y_axis
 
-        return [p1, p2, p3, p4, p1]  # closed loop
+        return [p1, p2, p3, p4]  # closed loop
     def draw_rectangle(self):
 
-        P1, P2, P3, width, height, x_axis, y_axis, z_axis = self.load_calibration()
+        P1, P2, P3, width, height, x_axis, y_axis, z_axis, quat = self.load_calibration()
         path = self.generate_rectangle(P1, x_axis, y_axis, width, height)
         self.get_logger().info("Drawing rectangle...")
         tcp_offset= 0.12
@@ -100,10 +108,11 @@ class MotionNode(Node):
                 real_point = point + tcp_offset*z_axis
 
             drawn_path.append(point)
+            self.get_logger().info(f"Moving to point: {real_point}")
             self.visualize_rectangle(drawn_path)
             self.moveit2.move_to_pose(
                 position=real_point.tolist(),
-                quat_xyzw=self.fixed_orientation,
+                quat_xyzw=quat,
                 cartesian=True
             )
             self.moveit2.wait_until_executed()
@@ -150,9 +159,11 @@ class MotionNode(Node):
     #     quat_xyzw=self.fixed_orientation,
     #     cartesian=True
     # )
-        self.moveit2.move_to_configuration([0.0, -1.57, 1.57, -1.57, -1.57, 1.57])
+        self.moveit2.move_to_configuration([1.57, -1.57, 1.57, -1.57, -1.57, 1.57])
         self.moveit2.wait_until_executed()
 
+    def from_home_to_ready(self):
+        self.moveit2.move_to_configuration([-4.71, -1.57, 1.57, -1.57, -1.57, 1.57])
     # Callback function for pen path subscriber
     def pen_path_callback(self, msg: Path):
         self.get_logger().info("Starting drawing...")

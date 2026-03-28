@@ -236,7 +236,7 @@ class CalibrationNode(Node):
         y_axis = y_proj / y_norm
 
         # Z axis
-        z_axis = np.cross(x_axis, y_axis)
+        z_axis = np.cross(y_axis, x_axis)
         z_axis /= np.linalg.norm(z_axis)
 
         width = np.linalg.norm(P2 - P1)
