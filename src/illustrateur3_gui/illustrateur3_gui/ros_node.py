@@ -111,6 +111,9 @@ class GuiNode(Node):
     def set_point_3(self):
         self.send_calibration_command("set_p3")
 
+    def on_confirm(self):
+        self.ros_node.send_calibration_command("confirm")
+        
     def toggle_freedrive(self):
         self.send_calibration_command("toggle_freedrive")
 

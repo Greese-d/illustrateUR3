@@ -199,6 +199,15 @@ class GuiApp:
         )
         self.point3_button.grid(row=2, column=0, padx=6, pady=6, sticky="new")
 
+        self.confirm_button = ttk.Button(
+            self.calibration_tab,
+            text="Confirm Point",
+            style="Big.TButton",
+            command=self.on_confirm
+        )
+        # place it in grid
+        self.confirm_button.grid(row=3, column=0, columnspan=2, padx=6, pady=6, sticky="ew")
+
         self.freedrive_button = ttk.Button(
             self.calibration_tab,
             text="Free Drive: OFF",
@@ -409,23 +418,30 @@ class GuiApp:
         self.root.after(30, self.poll_ros)
 
     def on_point_1(self):
-        self.ros_node.set_point_1
+        self.ros_node.set_point_1()
         self.status_text.config(text="Calibration Point 1 requested.")
         self.add_log("Calibration Point 1 button pressed.")
         self.ros_node.get_logger().info("Calibration Point 1 requested")
 
     def on_point_2(self):
-        self.ros_node.set_point_2
+        self.ros_node.set_point_2()
         self.status_text.config(text="Calibration Point 2 requested.")
         self.add_log("Calibration Point 2 button pressed.")
         self.ros_node.get_logger().info("Calibration Point 2 requested")
 
+
     def on_point_3(self):
-        self.ros_node.set_point_3
+        self.ros_node.set_point_3()
         self.status_text.config(text="Calibration Point 3 requested.")
         self.add_log("Calibration Point 3 button pressed.")
         self.ros_node.get_logger().info("Calibration Point 3 requested")
 
+    def on_confirm(self):
+        self.ros_node.send_calibration_command("confirm")
+        self.status_text.config(text="Confirming calibration point...")
+        self.add_log("Confirm button pressed.")
+        self.ros_node.get_logger().info("Confirm calibration point")
+        
     def on_toggle_freedrive(self):
         # send command to ROS
         self.ros_node.toggle_freedrive()

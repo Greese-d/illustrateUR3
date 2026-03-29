@@ -31,8 +31,8 @@ class MotionNode(Node):
             end_effector_name=ur.end_effector_name(),
             group_name=ur.MOVE_GROUP_ARM,   
         )
-        self.moveit2.max_velocity = 0.1
-        self.moveit2.max_acceleration = 0.1
+        self.moveit2.max_velocity = 0.05
+        self.moveit2.max_acceleration = 0.05
         self.fixed_orientation = [0.0, 1.0, 0.0, 0.0]   
          # Create subscriber and publisher topic
         self.create_subscription(
@@ -45,7 +45,8 @@ class MotionNode(Node):
         self.status_pub = self.create_publisher(String, "/drawing/status", 10)
 
         # Run the drawing function/other functions
-        self.go_home()
+        # self.go_home()
+        # time.sleep(2)
         self.start_drawing()
        
     #------------Load Calibration Data and Draw rectangle frame on paper--------------------------------
@@ -92,7 +93,7 @@ class MotionNode(Node):
         p3 = origin + w * x_axis + h * y_axis
         p4 = origin + h * y_axis
 
-        return [p1, p2, p3, p4]  # closed loop
+        return [p1, p2, p3, p4, p1]  # closed loop
     def draw_rectangle(self):
 
         P1, P2, P3, width, height, x_axis, y_axis, z_axis, quat = self.load_calibration()
@@ -116,6 +117,19 @@ class MotionNode(Node):
                 cartesian=True
             )
             self.moveit2.wait_until_executed()
+            # if not success:
+            #     self.get_logger().error(f"Failed to move to point: {real_point}")
+            #     self.get_logger().error("Trying to use different orientation...")
+            #     # Try with fixed orientation
+            #     success = self.moveit2.move_to_pose(
+            #         position=real_point.tolist(),
+            #         quat_xyzw=self.fixed_orientation,
+            #         cartesian=True
+            #     )
+            #     self.moveit2.wait_until_executed()
+            #     if not success:
+            #         self.get_logger().error(f"Failed to move to point: {real_point} with fixed orientation")
+                # return
         self.get_logger().info("Rectangle done")
 
     def visualize_rectangle(self, path):
@@ -159,7 +173,7 @@ class MotionNode(Node):
     #     quat_xyzw=self.fixed_orientation,
     #     cartesian=True
     # )
-        self.moveit2.move_to_configuration([1.57, -1.57, 1.57, -1.57, -1.57, 1.57])
+        self.moveit2.move_to_configuration([1.57, -1.57, 1.57, -1.57, -1.57, 0.0])
         self.moveit2.wait_until_executed()
 
     def from_home_to_ready(self):

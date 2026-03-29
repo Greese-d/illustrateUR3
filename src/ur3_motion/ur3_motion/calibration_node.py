@@ -17,15 +17,16 @@ import time
 import os
 from geometry_msgs.msg import Point
 from builtin_interfaces.msg import Duration
-def get_key():
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        key = sys.stdin.read(1)
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-    return key
+from std_msgs.msg import String
+# def get_key():
+#     fd = sys.stdin.fileno()
+#     old_settings = termios.tcgetattr(fd)
+#     try:
+#         tty.setraw(fd)
+#         key = sys.stdin.read(1)
+#     finally:
+#         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+#     return key
 
 
 class CalibrationNode(Node):
@@ -39,15 +40,15 @@ class CalibrationNode(Node):
             end_effector_name=ur.end_effector_name(),
             group_name=ur.MOVE_GROUP_ARM,
         )
-        self.moveit2.max_velocity = 0.1
-        self.moveit2.max_acceleration = 0.1
+        # self.moveit2.max_velocity = 0.1
+        # self.moveit2.max_acceleration = 0.1
 
         # Get transformation data for new end effector (attached on pentip)
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         self.marker_pub = self.create_publisher(Marker, "paper_marker", 10)
-
+        self.create_subscription(String, "/calibration/command", self.command_callback, 10)
         self.tcp_offset = 0.12 # length of the pen ( from end-effector to pentip)
 
         # FIX: always fixed size (P1,P2,P3)
@@ -56,25 +57,26 @@ class CalibrationNode(Node):
         self.current_index = None
         self.preview_point = None
 
-        self.last_key_time = 0
-        self.debounce_time = 0.3
+        # self.last_key_time = 0
+        # self.debounce_time = 0.3
 
-        self.show_menu()
-        self.timer = self.create_timer(0.1, self.loop)
+        # self.show_menu()
+        # self.timer = self.create_timer(0.1, self.loop)
+        # self.preview_timer = self.create_timer(0.2, self.preview_loop)
 
-    def show_menu(self):
-        self.get_logger().info("""
-        Calibration Started
-        -------------------
-        1 → Edit P1
-        2 → Edit P2
-        3 → Edit P3
+    # def show_menu(self):
+    #     self.get_logger().info("""
+    #     Calibration Started
+    #     -------------------
+    #     1 → Edit P1
+    #     2 → Edit P2
+    #     3 → Edit P3
 
-        Move robot → press ENTER to confirm
+    #     Move robot → press ENTER to confirm
 
-        r → Reset
-        q → Quit
-        """)
+    #     r → Reset
+    #     q → Quit
+    #     """)
 
     def transform_to_matrix(self, t, q):
         T = np.eye(4)
@@ -109,26 +111,80 @@ class CalibrationNode(Node):
             self.get_logger().warn(f"TF not ready: {e}")
             return None
 
-    def loop(self):
-        key = get_key()
+    # def loop(self):
+    #     key = get_key()
 
-        now = time.time()
-        if now - self.last_key_time < self.debounce_time:
-            return
+    #     now = time.time()
+    #     if now - self.last_key_time < self.debounce_time:
+    #         return
 
-        if key:
-            self.last_key_time = now
-            self.handle_key(key)
+    #     if key:
+    #         self.last_key_time = now
+    #         self.handle_key(key)
+    
+    # # Handle key inputs for selecting points, confirming positions, resetting, and quitting
+    # def handle_key(self, key):
+    #     # select which point to edit
+    #     if key in ["1", "2", "3"]:
+    #         self.current_index = int(key) - 1
+    #         self.get_logger().info(f"Editing P{key} → move robot, press ENTER")
 
-    # Handle key inputs for selecting points, confirming positions, resetting, and quitting
-    def handle_key(self, key):
-        # select which point to edit
-        if key in ["1", "2", "3"]:
-            self.current_index = int(key) - 1
-            self.get_logger().info(f"Editing P{key} → move robot, press ENTER")
+    #     # confirm
+    #     elif key == "\r" or key == "\n":
+    #         if self.current_index is None:
+    #             self.get_logger().warn("Select point first (1/2/3)")
+    #             return
 
-        # confirm
-        elif key == "\r" or key == "\n":
+    #         pos = self.get_pen_tip_position()
+    #         if pos is None:
+    #             return
+
+    #         # overwrite directly (NO append)
+    #         self.points[self.current_index] = pos
+
+    #         self.get_logger().info(
+    #             f"P{self.current_index+1} CONFIRMED: {pos}"
+    #         )
+
+    #         self.current_index = None
+
+    #         # auto visualize
+    #         if all(p is not None for p in self.points):
+    #             self.visualize_paper()
+
+    #     elif key == "r":
+    #         self.reset_calibration()
+
+    #     elif key == "q":
+    #         self.get_logger().info("Exit calibration")
+    #         self.destroy_node()
+    #         rclpy.shutdown()
+
+    #     # preview continuously
+    #     if self.current_index is not None:
+    #         pos = self.get_pen_tip_position()
+    #         if pos is not None:
+    #             self.get_logger().info(
+    #                 f"P{self.current_index+1} preview: {pos}"
+    #             )
+                
+    def command_callback(self, msg):
+        if msg.data == "set_p1":
+            self.current_index = 0
+            self.get_logger().info("Editing P1")
+
+        elif msg.data == "set_p2":
+            self.current_index = 1
+            self.get_logger().info("Editing P2")
+
+        elif msg.data == "set_p3":
+            self.current_index = 2
+            self.get_logger().info("Editing P3")
+
+        elif msg.data == "toggle_freedrive":
+            self.get_logger().info("Toggle freedrive (implement here)")
+
+        elif msg.data == "confirm":
             if self.current_index is None:
                 self.get_logger().warn("Select point first (1/2/3)")
                 return
@@ -150,22 +206,25 @@ class CalibrationNode(Node):
             if all(p is not None for p in self.points):
                 self.visualize_paper()
 
-        elif key == "r":
-            self.reset_calibration()
-
-        elif key == "q":
-            self.get_logger().info("Exit calibration")
-            self.destroy_node()
-            rclpy.shutdown()
-
-        # preview continuously
+               # preview continuously
         if self.current_index is not None:
             pos = self.get_pen_tip_position()
             if pos is not None:
                 self.get_logger().info(
                     f"P{self.current_index+1} preview: {pos}"
                 )
-    
+
+    # def reset_calibration(self):
+    #     self.points = [None, None, None]
+    #     self.current_index = None
+    #     marker = Marker()
+    #     marker.header.frame_id = "base_link"
+    #     marker.action = Marker.DELETE
+    #     marker.id = 0
+    #     self.marker_pub.publish(marker)
+    #     self.get_logger().info("Calibration reset okeeeeeeah ")
+    #     self.show_menu()
+
     # After visualizing, also save the calibration to a JSON file for later use
     def get_workspace_data_path(self):
         # current file path (inside install or build)
@@ -236,7 +295,7 @@ class CalibrationNode(Node):
         y_axis = y_proj / y_norm
 
         # Z axis
-        z_axis = np.cross(y_axis, x_axis)
+        z_axis = np.cross(x_axis, y_axis)
         z_axis /= np.linalg.norm(z_axis)
 
         width = np.linalg.norm(P2 - P1)
@@ -311,19 +370,6 @@ class CalibrationNode(Node):
         self.get_logger().info("✅ Paper + XYZ axes shown")
 
         self.save_to_json(P1, P2, P3, width, height, center, quat, x_axis, y_axis, z_axis)
-
-    def reset_calibration(self):
-        self.points = [None, None, None]
-        self.current_index = None
-
-        marker = Marker()
-        marker.header.frame_id = "base_link"
-        marker.action = Marker.DELETE
-        marker.id = 0
-        self.marker_pub.publish(marker)
-
-        self.get_logger().info("Calibration reset okeeeeeeah ")
-        self.show_menu()
 
     def to_point(self, p):
         pt = Point()
