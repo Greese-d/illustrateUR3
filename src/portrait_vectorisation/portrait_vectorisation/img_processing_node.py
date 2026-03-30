@@ -85,7 +85,9 @@ class ImgProcessingNode(Node):
             self.capture_snapshot_callback(request, response)
 
         snapshot_img = self.bridge.imgmsg_to_cv2(self.snapshot, desired_encoding='bgr8')
-        portrait_msg = self.bridge.cv2_to_imgmsg(self.processor.process(snapshot_img), encoding='mono8')
+
+        preview, strokes = self.processor.process(snapshot_img)
+        portrait_msg = self.bridge.cv2_to_imgmsg(preview, encoding='mono8')
 
         self.portrait_pub.publish(portrait_msg)
         self.get_logger().info('Portrait preview published.')
