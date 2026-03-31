@@ -1,3 +1,14 @@
+# To launch GUI + Calibration and motion (start drawing rectangle from calibrated data saved in json):
+In first terminal:
+GUI + Calibration (note: this main launch doesnt include the launching for webcame to have gesture vision)
+```bash
+ros2 launch illustrateur3_gui main.launch.py
+```
+In second terminal:
+Run motion node to draw rectangle on calibrated paper (for now)
+```bash
+ros2 run ur3_motion motion_node
+```
 # gesture_vision (ROS 2 Humble) — Webcam + Hand Gesture Recognition
 
 This package publishes webcam images to ROS 2 and runs a MediaPipe-based hand gesture recognizer that outputs a ROS topic.
