@@ -17,6 +17,7 @@ class GuiApp:
 
         self.camera_tk_image = None
         self.preview_tk_image = None
+        self.live_drawing_tk_image = None
         self.freedrive_on = False
 
         self.setup_styles()
@@ -25,6 +26,7 @@ class GuiApp:
         self.ros_node.state_callback_fn = self.on_state_update
         self.ros_node.camera_callback_fn = self.on_camera_frame
         self.ros_node.preview_callback_fn = self.on_preview_frame
+        self.ros_node.live_drawing_callback_fn = self.on_live_drawing_frame
 
         self.update_ui_for_state("IDLE")
 
@@ -116,12 +118,13 @@ class GuiApp:
         self.preview_frame.columnconfigure(0, weight=1)
         self.preview_frame.rowconfigure(1, weight=1)
 
-        # Custom header buttons
+       # Custom header buttons
         self.preview_header = ttk.Frame(self.preview_frame)
         self.preview_header.grid(row=0, column=0, sticky="ew", pady=(0, 6))
         self.preview_header.columnconfigure(0, weight=0)
         self.preview_header.columnconfigure(1, weight=0)
-        self.preview_header.columnconfigure(2, weight=1)
+        self.preview_header.columnconfigure(2, weight=0)
+        self.preview_header.columnconfigure(3, weight=1)
 
         self.preview_button = ttk.Button(
             self.preview_header,
@@ -138,6 +141,14 @@ class GuiApp:
             command=self.open_calibration_tab
         )
         self.calibration_button.grid(row=0, column=1, sticky="w")
+
+        self.live_drawing_button = ttk.Button(
+            self.preview_header,
+            text="Live-Drawing",
+            style="TabSwitch.TButton",
+            command=self.open_live_drawing_tab
+        )
+        self.live_drawing_button.grid(row=0, column=2, padx=(6, 0), sticky="w")
 
         self.preview_notebook = ttk.Notebook(self.preview_frame)
         self.preview_notebook.grid(row=1, column=0, sticky="nsew")
@@ -174,6 +185,24 @@ class GuiApp:
             style="Heading.TLabel"
         )
         self.calibration_title.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
+
+        # Live-Drawing page
+        self.live_drawing_tab = ttk.Frame(self.preview_notebook)
+        self.live_drawing_tab.columnconfigure(0, weight=1)
+        self.live_drawing_tab.rowconfigure(0, weight=1)
+
+        self.live_drawing_placeholder = tk.Label(
+            self.live_drawing_tab,
+            text="Live drawing will appear here in real time",
+            bg="#2b2b2b",
+            fg="white",
+            font=("Arial", 14),
+            relief="ridge",
+            bd=2
+        )
+        self.live_drawing_placeholder.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+
+        self.preview_notebook.add(self.live_drawing_tab, text="Live-Drawing")
 
         self.point1_button = ttk.Button(
             self.calibration_tab,
@@ -363,6 +392,11 @@ class GuiApp:
         self.status_text.config(text="Preview view opened.")
         self.add_log("Switched to Preview view.")
 
+    def open_live_drawing_tab(self):
+        self.preview_notebook.select(self.live_drawing_tab)
+        self.status_text.config(text="Live-Drawing view opened.")
+        self.add_log("Switched to Live-Drawing view.")
+
     def on_capture(self):
         self.status_text.config(text="Capture requested.")
         self.add_log("Capture Portrait button pressed.")
@@ -406,12 +440,21 @@ class GuiApp:
             self.camera_tk_image = tk_img
         elif which == "preview":
             self.preview_tk_image = tk_img
+        elif which == "live_drawing":
+            self.live_drawing_tk_image = tk_img
 
     def on_camera_frame(self, frame_bgr):
         self.render_frame_to_label(frame_bgr, self.camera_placeholder, "camera")
 
     def on_preview_frame(self, frame_bgr):
         self.render_frame_to_label(frame_bgr, self.preview_placeholder, "preview")
+
+    def on_live_drawing_frame(self, frame_bgr):
+        self.render_frame_to_label(
+            frame_bgr,
+            self.live_drawing_placeholder,
+            "live_drawing"
+        )
 
     def poll_ros(self):
         rclpy.spin_once(self.ros_node, timeout_sec=0.0)

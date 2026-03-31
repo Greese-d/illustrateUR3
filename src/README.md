@@ -99,7 +99,7 @@ This assumes:
 - Virtual environment is at `~/venvs/mp_ros`
 - Package is already built
 
-You need **2 terminals**.
+You need **3 terminals**.
 
 ⚠ IMPORTANT: In ALL terminals, run this first:
 ```bash
