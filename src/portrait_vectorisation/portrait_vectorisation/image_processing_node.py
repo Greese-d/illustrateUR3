@@ -12,7 +12,7 @@ from cv_bridge import CvBridge
 import portrait_vectorisation.portrait_processor as pp
 
 
-class ImgProcessingNode(Node):
+class ImageProcessingNode(Node):
     def __init__(self):
         super().__init__('image_processing_node')
 
@@ -302,7 +302,7 @@ class ImgProcessingNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = ImgProcessingNode()
+    node = ImageProcessingNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
