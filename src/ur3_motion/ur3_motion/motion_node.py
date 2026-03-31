@@ -45,9 +45,9 @@ class MotionNode(Node):
         self.status_pub = self.create_publisher(String, "/drawing/status", 10)
 
         # Run the drawing function/other functions
-        # self.go_home()
-        # time.sleep(2)
-        self.start_drawing()
+        self.go_home()
+        time.sleep(2)
+        self.draw_rectangle()
        
     #------------Load Calibration Data and Draw rectangle frame on paper--------------------------------
     # Extract calibration data from json file (rs2_ws/data/paper_calibration.json)
@@ -110,13 +110,14 @@ class MotionNode(Node):
 
             drawn_path.append(point)
             self.get_logger().info(f"Moving to point: {real_point}")
-            self.visualize_rectangle(drawn_path)
+            # self.visualize_rectangle(drawn_path)
             self.moveit2.move_to_pose(
                 position=real_point.tolist(),
                 quat_xyzw=quat,
                 cartesian=True
             )
             self.moveit2.wait_until_executed()
+            self.visualize_rectangle(drawn_path)
             # if not success:
             #     self.get_logger().error(f"Failed to move to point: {real_point}")
             #     self.get_logger().error("Trying to use different orientation...")
@@ -163,10 +164,6 @@ class MotionNode(Node):
         self.marker_pub.publish(marker)
 
     #----------------------------Fundamental Functions----------------------------------------------
-    def start_drawing(self):
-        self.draw_rectangle()
-        
-    
     def go_home(self):
     #     self.moveit2.move_to_pose(
     #     position=[0.298, 0.113, 0.312],
