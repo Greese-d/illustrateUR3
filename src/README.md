@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # gesture_vision (ROS 2 Humble) — Webcam + Hand Gesture Recognition
 
 This package publishes webcam images to ROS 2 and runs a MediaPipe-based hand gesture recognizer that outputs a ROS topic.
@@ -152,4 +153,6 @@ source /opt/ros/humble/setup.bash
 
 colcon build --symlink-install
 ```
+=======
+>>>>>>> c914428a028a4c1df5802b951365dff7243293bd
 
