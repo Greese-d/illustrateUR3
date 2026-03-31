@@ -1,0 +1,315 @@
+import time
+
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import Image
+from nav_msgs.msg import Path
+from std_srvs.srv import Trigger
+from visualization_msgs.msg import Marker, MarkerArray
+import cv2
+from cv_bridge import CvBridge
+
+import portrait_vectorisation.portrait_processor as pp
+
+
+class ImgProcessingNode(Node):
+    def __init__(self):
+        super().__init__('image_processing_node')
+
+        # ------------------------------------------------------------------ #
+        # Parameters                                                           #
+        # ------------------------------------------------------------------ #
+        self.declare_parameter('stroke_publish_delay', 0.05)   # seconds between strokes
+        self.declare_parameter('camera_topic', '/camera/image_raw')
+        self.declare_parameter('snapshot_topic', '/camera/snapshot')
+        self.declare_parameter('portrait_topic', '/portrait/preview')
+        self.declare_parameter('strokes_topic', '/portrait/strokes')
+        self.declare_parameter('markers_topic', '/portrait/markers')
+
+        self._stroke_delay  = self.get_parameter('stroke_publish_delay').value
+        camera_topic        = self.get_parameter('camera_topic').value
+        snapshot_topic      = self.get_parameter('snapshot_topic').value
+        portrait_topic      = self.get_parameter('portrait_topic').value
+        strokes_topic       = self.get_parameter('strokes_topic').value
+        markers_topic       = self.get_parameter('markers_topic').value
+
+        # ------------------------------------------------------------------ #
+        # State                                                                #
+        # ------------------------------------------------------------------ #
+        self.latest_image: Image | None = None   # most recent frame from camera
+        self.snapshot:     Image | None = None   # frozen frame ready for processing
+        self._snapshot_used = False              # True once snapshot has been processed
+
+        self.bridge     = CvBridge()
+        self.processor  = pp.PortraitProcessor()
+
+        # ------------------------------------------------------------------ #
+        # Subscribers                                                          #
+        # ------------------------------------------------------------------ #
+        self.subscription = self.create_subscription(
+            Image,
+            camera_topic,
+            self._image_callback,
+            10,
+        )
+
+        # ------------------------------------------------------------------ #
+        # Publishers                                                           #
+        # ------------------------------------------------------------------ #
+        self.snapshot_pub = self.create_publisher(Image,       snapshot_topic, 10)
+        self.portrait_pub = self.create_publisher(Image,       portrait_topic, 10)
+        self.stroke_pub   = self.create_publisher(Path,        strokes_topic,  50)
+        self.marker_pub   = self.create_publisher(MarkerArray, markers_topic,  10)
+
+        # ------------------------------------------------------------------ #
+        # Services                                                             #
+        # ------------------------------------------------------------------ #
+        self.snapshot_service = self.create_service(
+            Trigger,
+            '/capture_snapshot',
+            self._capture_snapshot_callback,
+        )
+        self.portrait_service = self.create_service(
+            Trigger,
+            '/create_portrait',
+            self._create_portrait_callback,
+        )
+
+        self.get_logger().info(
+            f'Image processing node ready.\n'
+            # f'  Listening on : {camera_topic}\n'
+            # f'  Snapshot     : {snapshot_topic}\n'
+            # f'  Portrait     : {portrait_topic}\n'
+            # f'  Strokes      : {strokes_topic}\n'
+            # f'  Markers      : {markers_topic}\n'
+            # f'  Stroke delay : {self._stroke_delay}s'
+        )
+
+    # ---------------------------------------------------------------------- #
+    # Subscriber callback — only stores the latest frame                      #
+    # ---------------------------------------------------------------------- #
+
+    def _image_callback(self, msg: Image) -> None:
+        self.latest_image = msg
+
+    # ---------------------------------------------------------------------- #
+    # Service 1 — /capture_snapshot                                           #
+    # ---------------------------------------------------------------------- #
+
+    def _capture_snapshot_callback(self, request, response):
+        """
+        Freeze the most recent camera frame into the snapshot buffer and
+        publish it on the snapshot topic.
+        """
+        if self.latest_image is None:
+            msg = (
+                'No camera frame received yet. '
+                'Is the camera node running?'
+            )
+            self.get_logger().warn(msg)
+            response.success = False
+            response.message = msg
+            return response
+
+        self.snapshot = self.latest_image
+        self._snapshot_used = False
+
+        self.snapshot_pub.publish(self.snapshot)
+        self.get_logger().info('Snapshot captured and published.')
+        response.success = True
+        response.message = 'Snapshot captured successfully.'
+        return response
+
+    # ---------------------------------------------------------------------- #
+    # Service 2 — /create_portrait                                            #
+    # ---------------------------------------------------------------------- #
+
+    def _create_portrait_callback(self, request, response):
+        """
+        Process the current snapshot into a portrait and publish:
+          1. The preview image on /portrait/preview
+          2. Each stroke as a nav_msgs/Path on /portrait/strokes, with a small
+             delay between publishes so the subscriber can receive them in order.
+
+        If the snapshot buffer is empty or has already been processed,
+        a fresh snapshot is taken automatically before proceeding.
+        """
+        # ---- ensure we have a fresh snapshot --------------------------------
+        if self.snapshot is None or self._snapshot_used:
+            reason = 'empty' if self.snapshot is None else 'already processed'
+            self.get_logger().info(
+                f'Snapshot buffer is {reason}. '
+                f'Taking a fresh snapshot automatically.'
+            )
+            snap_response = self._capture_snapshot_callback(request, Trigger.Response())
+
+            if not snap_response.success:
+                msg = f'Aborted: could not obtain a snapshot — {snap_response.message}'
+                self.get_logger().error(msg)
+                response.success = False
+                response.message = msg
+                return response
+
+        # ---- convert ROS image → OpenCV -------------------------------------
+        try:
+            cv_image = self.bridge.imgmsg_to_cv2(
+                self.snapshot, desired_encoding='bgr8'
+            )
+        except Exception as e:
+            msg = f'Failed to decode snapshot image: {e}'
+            self.get_logger().error(msg)
+            response.success = False
+            response.message = msg
+            return response
+
+        # ---- run portrait processing pipeline --------------------------------
+        self.get_logger().info('Starting portrait processing pipeline...')
+        try:
+            canvas, strokes = self.processor.process(cv_image)
+        except Exception as e:
+            msg = f'Portrait processing failed: {e}'
+            self.get_logger().error(msg)
+            response.success = False
+            response.message = msg
+            return response
+
+        if not strokes:
+            msg = (
+                'Processing produced zero strokes. '
+                'The image may be blank or the subject was not detected.'
+            )
+            self.get_logger().warn(msg)
+            response.success = False
+            response.message = msg
+            return response
+
+        self.get_logger().info(
+            f'Processing complete: {len(strokes)} stroke(s) generated.'
+        )
+
+        # ---- publish preview image ------------------------------------------
+        try:
+            portrait_msg = self.bridge.cv2_to_imgmsg(canvas, encoding='mono8')
+            portrait_msg.header.stamp    = self.get_clock().now().to_msg()
+            portrait_msg.header.frame_id = 'camera_frame'
+            self.portrait_pub.publish(portrait_msg)
+            self.get_logger().info('Portrait preview published.')
+        except Exception as e:
+            # Non-fatal — log and continue to stroke publishing
+            self.get_logger().error(f'Failed to publish portrait preview: {e}')
+
+        # ---- publish strokes in order with delay between each ---------------
+        now = self.get_clock().now().to_msg()
+        failed = 0
+
+        for idx, path in enumerate(strokes):
+            try:
+                path.header.stamp = now
+                for pose in path.poses:
+                    pose.header.stamp = now
+
+                self.stroke_pub.publish(path)
+
+                if self._stroke_delay > 0.0:
+                    time.sleep(self._stroke_delay)
+
+            except Exception as e:
+                self.get_logger().warn(
+                    f'Failed to publish stroke {idx + 1}/{len(strokes)}: {e}'
+                )
+                failed += 1
+
+        # ---- publish all strokes as a single MarkerArray for RViz2 ----------
+        try:
+            self.marker_pub.publish(self._strokes_to_marker_array(strokes, now))
+            self.get_logger().info('Marker array published for RViz2.')
+        except Exception as e:
+            # Non-fatal — pipeline data was already sent above
+            self.get_logger().warn(f'Failed to publish marker array: {e}')
+
+        # Mark snapshot as consumed so the next call auto-refreshes
+        self._snapshot_used = True
+
+        if failed == 0:
+            msg = (
+                f'All {len(strokes)} stroke(s) published successfully '
+                f'({self._stroke_delay * 1000:.0f}ms delay between each).'
+            )
+            self.get_logger().info(msg)
+            response.success = True
+            response.message = msg
+        else:
+            msg = f'{failed}/{len(strokes)} stroke(s) failed to publish.'
+            self.get_logger().warn(msg)
+            response.success = False
+            response.message = msg
+
+        return response
+
+    # ---------------------------------------------------------------------- #
+    # RViz2 visualisation helper                                              #
+    # ---------------------------------------------------------------------- #
+
+    def _strokes_to_marker_array(self, strokes: list, stamp) -> MarkerArray:
+        """
+        Convert a list of nav_msgs/Path strokes into a single MarkerArray
+        where each stroke is one LINE_STRIP marker with a unique id.
+        Sending all strokes in one message means RViz2 renders them all at
+        once rather than overwriting on each publish.
+        """
+        array = MarkerArray()
+
+        for idx, path in enumerate(strokes):
+            marker = Marker()
+            marker.header.frame_id = path.header.frame_id
+            marker.header.stamp    = stamp
+            marker.ns              = 'portrait_strokes'
+            marker.id              = idx
+            marker.type            = Marker.LINE_STRIP
+            marker.action          = Marker.ADD
+
+            # Scale: line width in metres — adjust to taste in RViz2
+            marker.scale.x = 6.0   # pixel-space units, scale in RViz2 display
+
+            # White lines, fully opaque
+            marker.color.r = 1.0
+            marker.color.g = 1.0
+            marker.color.b = 1.0
+            marker.color.a = 1.0
+
+            # Persist until explicitly deleted (0 = forever)
+            marker.lifetime.sec     = 0
+            marker.lifetime.nanosec = 0
+
+            for pose_stamped in path.poses:
+                marker.points.append(pose_stamped.pose.position)
+
+            array.markers.append(marker)
+
+        return array
+
+    # ---------------------------------------------------------------------- #
+    # Cleanup                                                                  #
+    # ---------------------------------------------------------------------- #
+
+    def destroy_node(self):
+        self.processor.close()
+        self.get_logger().info('Portrait processor released.')
+        super().destroy_node()
+
+
+# --------------------------------------------------------------------------- #
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = ImgProcessingNode()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
