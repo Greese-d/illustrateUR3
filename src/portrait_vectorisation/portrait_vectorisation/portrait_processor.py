@@ -20,8 +20,9 @@ class PortraitProcessor:
     def __init__(
         self,
         chain_threshold: float = 10.0,
-        sort_strokes: bool = True,
         line_thickness: int = 6,
+        sort_strokes: bool = True
+        
     ):
         """
         Parameters
@@ -37,7 +38,7 @@ class PortraitProcessor:
         """
         mp_selfie = mp.solutions.selfie_segmentation
         self.segmenter = mp_selfie.SelfieSegmentation(model_selection=1)
-        self.chain_threshold = chain_threshold
+        self.chain_threshold = line_thickness
         self.sort_strokes = sort_strokes
         self.line_thickness = line_thickness
 
@@ -212,7 +213,7 @@ class PortraitProcessor:
             merged = True
             while merged:
                 merged = False
-                best_dist = self.line_thickness  # Max distance to consider for chaining
+                best_dist = self.chain_threshold  # Max distance to consider for chaining
                 best_idx = -1
                 best_mode = None   # ('append'|'prepend', flip: bool)
 
