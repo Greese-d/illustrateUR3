@@ -4,7 +4,7 @@ from PIL import Image as PILImage, ImageTk
 
 import rclpy
 import cv2
-
+import json
 
 class GuiApp:
     def __init__(self, root, ros_node):
@@ -398,9 +398,12 @@ class GuiApp:
         self.add_log("Switched to Live-Drawing view.")
 
     def on_capture(self):
-        self.status_text.config(text="Capture requested.")
+        self.status_text.config(text="Capture requested...")
         self.add_log("Capture Portrait button pressed.")
         self.ros_node.get_logger().info("Capture Portrait requested")
+
+        self.capture_button.config(state="disabled")  # stop double-click spam
+        self.ros_node.create_portrait(self.on_capture_response)  # call ROS service
 
     def on_start(self):
         self.status_text.config(text="Start drawing requested.")
@@ -510,3 +513,17 @@ class GuiApp:
 
         except Exception as e:
             print(f"Failed to parse calibration status: {e}")
+
+    def on_capture_response(self, success, message):
+        self.root.after(0, lambda: self._handle_capture_response(success, message))  # safely update Tkinter from callback
+
+    def _handle_capture_response(self, success, message):
+        self.add_log(f"/create_portrait response: success={success}, message='{message}'")  # log service result
+        self.status_text.config(text=message if message else "Portrait capture completed.")  # show backend message
+
+        if success:
+            self.add_log("Portrait capture succeeded.")
+            self.update_ui_for_state("PREVIEW_READY")
+        else:
+            self.add_log("Portrait capture failed.")
+            self.update_ui_for_state("ERROR")
