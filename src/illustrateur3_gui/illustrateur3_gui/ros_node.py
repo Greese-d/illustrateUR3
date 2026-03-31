@@ -39,14 +39,14 @@ class GuiNode(Node):
 
         self.camera_sub = self.create_subscription(
             Image,
-            "/gesture/debug_image",
+            "/camera/image_raw",
             self.camera_image_callback,
             10
         )
 
         self.preview_sub = self.create_subscription(
             Image,
-            "/preview/image",
+            "/portrait/preview",
             self.preview_image_callback,
             10
         )

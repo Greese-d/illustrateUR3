@@ -123,6 +123,6 @@ def generate_launch_description():
         moveit,
         gui_node,
         calibration_node,
-        #camera_publisher,
+        camera_publisher,
         image_processing_node,
     ])

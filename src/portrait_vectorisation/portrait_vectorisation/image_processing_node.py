@@ -12,7 +12,7 @@ from cv_bridge import CvBridge
 import portrait_vectorisation.portrait_processor as pp
 
 
-class ImageProcessingNode(Node):
+class ImgProcessingNode(Node):
     def __init__(self):
         super().__init__('image_processing_node')
 
@@ -77,12 +77,12 @@ class ImageProcessingNode(Node):
 
         self.get_logger().info(
             f'Image processing node ready.\n'
-            # f'  Listening on : {camera_topic}\n'
-            # f'  Snapshot     : {snapshot_topic}\n'
-            # f'  Portrait     : {portrait_topic}\n'
-            # f'  Strokes      : {strokes_topic}\n'
-            # f'  Markers      : {markers_topic}\n'
-            # f'  Stroke delay : {self._stroke_delay}s'
+            f'  Listening on : {camera_topic}\n'
+            f'  Snapshot     : {snapshot_topic}\n'
+            f'  Portrait     : {portrait_topic}\n'
+            f'  Strokes      : {strokes_topic}\n'
+            f'  Markers      : {markers_topic}\n'
+            f'  Stroke delay : {self._stroke_delay}s'
         )
 
     # ---------------------------------------------------------------------- #
@@ -189,7 +189,7 @@ class ImageProcessingNode(Node):
 
         # ---- publish preview image ------------------------------------------
         try:
-            portrait_msg = self.bridge.cv2_to_imgmsg(canvas, encoding='mono8')
+            portrait_msg = self.bridge.cv2_to_imgmsg(canvas, encoding='bgr8')
             portrait_msg.header.stamp    = self.get_clock().now().to_msg()
             portrait_msg.header.frame_id = 'camera_frame'
             self.portrait_pub.publish(portrait_msg)
@@ -269,12 +269,12 @@ class ImageProcessingNode(Node):
             marker.action          = Marker.ADD
 
             # Scale: line width in metres — adjust to taste in RViz2
-            marker.scale.x = 6.0   # pixel-space units, scale in RViz2 display
+            marker.scale.x = 1.0   # pixel-space units, scale in RViz2 display
 
             # White lines, fully opaque
-            marker.color.r = 1.0
-            marker.color.g = 1.0
-            marker.color.b = 1.0
+            marker.color.r = 0.0
+            marker.color.g = 0.0
+            marker.color.b = 0.0
             marker.color.a = 1.0
 
             # Persist until explicitly deleted (0 = forever)
@@ -302,7 +302,7 @@ class ImageProcessingNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = ImageProcessingNode()
+    node = ImgProcessingNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

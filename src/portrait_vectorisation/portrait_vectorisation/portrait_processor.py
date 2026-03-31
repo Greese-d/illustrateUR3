@@ -19,10 +19,8 @@ _RawStroke = List[_Point]
 class PortraitProcessor:
     def __init__(
         self,
-        chain_threshold: float = 10.0,
         line_thickness: int = 6,
-        sort_strokes: bool = True
-        
+        sort_strokes: bool = True,
     ):
         """
         Parameters
@@ -38,9 +36,8 @@ class PortraitProcessor:
         """
         mp_selfie = mp.solutions.selfie_segmentation
         self.segmenter = mp_selfie.SelfieSegmentation(model_selection=1)
-        self.chain_threshold = line_thickness
-        self.sort_strokes = sort_strokes
         self.line_thickness = line_thickness
+        self.sort_strokes = sort_strokes
 
     # ------------------------------------------------------------------
     # Public API
@@ -76,7 +73,7 @@ class PortraitProcessor:
         img = self.remove_background(image)
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         filtered = cv2.bilateralFilter(gray, 9, 120, 120)
-        edges = cv2.Canny(filtered, 25, 60)
+        edges = cv2.Canny(filtered, 20, 50)
 
         raw_contours = self._extract_contours(edges)
         raw_strokes = self._contours_to_raw(raw_contours)
@@ -100,7 +97,7 @@ class PortraitProcessor:
         rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         results = self.segmenter.process(rgb)
         mask = results.segmentation_mask
-        mask = (mask > 0.7).astype(np.uint8)
+        mask = (mask > 0.4).astype(np.uint8)
         kernel = np.ones((7, 7), np.uint8)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
@@ -213,7 +210,7 @@ class PortraitProcessor:
             merged = True
             while merged:
                 merged = False
-                best_dist = self.chain_threshold  # Max distance to consider for chaining
+                best_dist = self.line_thickness  # max distance to consider for chaining
                 best_idx = -1
                 best_mode = None   # ('append'|'prepend', flip: bool)
 
@@ -311,11 +308,25 @@ class PortraitProcessor:
     # ------------------------------------------------------------------
 
     def _render(self, edges: np.ndarray, strokes: List[_RawStroke]) -> np.ndarray:
-        canvas = np.ones_like(edges) * 255
-        for stroke in strokes:
+        """
+        Render strokes onto a white BGR canvas.
+        Each stroke is drawn in its own colour, currently all black (0, 0, 0).
+        The colour per stroke is determined by _stroke_colour(), making it
+        straightforward to introduce per-stroke colours for multicolour support.
+        """
+        canvas = np.ones((*edges.shape, 3), dtype=np.uint8) * 255
+        for idx, stroke in enumerate(strokes):
             pts = np.array(stroke, dtype=np.int32).reshape((-1, 1, 2))
-            cv2.polylines(canvas, [pts], isClosed=False, color=0, thickness=self.line_thickness)
+            cv2.polylines(canvas, [pts], isClosed=False, color=self._stroke_colour(idx), thickness=6)
         return canvas
+
+    def _stroke_colour(self, stroke_idx: int) -> Tuple[int, int, int]:
+        """
+        Return the BGR colour for a given stroke index.
+        Currently returns black for all strokes.
+        Override or extend this method to add multicolour support in the future.
+        """
+        return (0, 0, 0)
 
 
 # ------------------------------------------------------------------
