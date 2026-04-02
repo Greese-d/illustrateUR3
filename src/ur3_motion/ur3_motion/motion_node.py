@@ -42,9 +42,11 @@ class MotionNode(Node):
         self.marker_pub = self.create_publisher(Marker, "paper_marker", 10)
         self.status_pub = self.create_publisher(String, "/drawing/status", 10)
         self.stroke_queue = []
+        self.stroke_id = 0
         self.create_subscription(Path,"/portrait/strokes", self.pen_path_callback,10)
     
         # Run the drawing function/other functions
+        time.sleep(10)
         self.go_home()
         time.sleep(2)
         self.draw_rectangle()
@@ -174,15 +176,15 @@ class MotionNode(Node):
         self.moveit2.move_to_configuration([1.57, -1.57, 1.57, -1.57, -1.57, 0.0])
         self.moveit2.wait_until_executed()
     # Visualize the stroke points in RViz
-    def visualize_stroke(self, msg, P1, width, height, x_axis, y_axis):
+    def visualize_stroke_path(self, path):
 
         marker = Marker()
         marker.header.frame_id = "base_link"
         marker.header.stamp = self.get_clock().now().to_msg()
 
         marker.ns = "stroke_line"
-        marker.id = 30
-        marker.type = Marker.LINE_STRIP   # ✅ CHANGE HERE
+        marker.id = self.stroke_id
+        marker.type = Marker.LINE_STRIP
         marker.action = Marker.ADD
 
         marker.scale.x = 0.003
@@ -192,20 +194,11 @@ class MotionNode(Node):
         marker.color.b = 1.0
         marker.color.a = 1.0
 
-        image_width = 1920
-        image_height = 1080
-
-        for pose in msg.poses:
-            u = pose.pose.position.x / image_width
-            v = pose.pose.position.y / image_height
-
-            point = P1 + u * width * x_axis + v * height * y_axis
-
+        for p in path:
             pt = Point()
-            pt.x = float(point[0])
-            pt.y = float(point[1])
-            pt.z = float(point[2])
-
+            pt.x = float(p[0])
+            pt.y = float(p[1])
+            pt.z = float(p[2])
             marker.points.append(pt)
 
         self.marker_pub.publish(marker)
@@ -237,7 +230,7 @@ class MotionNode(Node):
         self.marker_pub.publish(marker)
     # Callback function for pen path subscriber
     def pen_path_callback(self, msg: Path):
-        # self.get_logger().info(f"Received stroke with {len(msg.poses)} points")
+        self.get_logger().info(f"Received stroke with {len(msg.poses)} points")
         self.stroke_queue.append(msg)
     def draw_portrait(self):
 
@@ -271,7 +264,7 @@ class MotionNode(Node):
         else:
             start_up = start_point + (tcp_offset + lift_height) * z_axis
         self.get_logger().info(f"Moving above first point in real world: ({start_up[0]}, {start_up[1]}, {start_up[2]})")
-        self.visualize_start_point(start_up)
+        # self.visualize_start_point(start_up)
         self.get_logger().info("Started point visualization")    
         self.moveit2.move_to_pose(
             position=start_up.tolist(),
@@ -299,6 +292,7 @@ class MotionNode(Node):
         # -----------------------------
         # 3. DRAW CONTINUOUSLY
         # -----------------------------
+        drawn_path = []
         for pose in msg.poses:
 
             pixel_x = pose.pose.position.x
@@ -320,7 +314,9 @@ class MotionNode(Node):
                 cartesian=True
             )
             self.moveit2.wait_until_executed()
-            self.visualize_stroke(msg, P1, width, height, x_axis, y_axis)
+            drawn_path.append(point)
+            self.visualize_stroke_path(drawn_path)
+            self.stroke_id += 1
 
         # # -----------------------------
         # # 4. PEN UP AFTER STROKE
