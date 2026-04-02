@@ -45,7 +45,7 @@ class GuiNode(Node):
 
         self.camera_sub = self.create_subscription(
             Image,
-            "/camera/image_raw",
+            "/gesture/debug_image", #/gesture/debug_image for Gestures overlay, /camera/image_raw for regular image
             self.camera_image_callback,
             10
         )
