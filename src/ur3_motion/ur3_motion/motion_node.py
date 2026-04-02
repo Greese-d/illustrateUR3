@@ -1,6 +1,10 @@
 
+from asyncio.log import logger
+
+from geometry_msgs import msg
 import rclpy
 from rclpy.node import Node
+# from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from tf2_ros import Buffer, TransformListener
 from pymoveit2 import MoveIt2
 from pymoveit2.robots import ur
@@ -35,20 +39,18 @@ class MotionNode(Node):
         self.moveit2.max_acceleration = 0.05
         self.fixed_orientation = [0.0, 1.0, 0.0, 0.0]   
          # Create subscriber and publisher topic
-        self.create_subscription(
-            Path,
-            "pen_path",
-            self.pen_path_callback,
-            10,
-        )
         self.marker_pub = self.create_publisher(Marker, "paper_marker", 10)
         self.status_pub = self.create_publisher(String, "/drawing/status", 10)
-
+        self.stroke_queue = []
+        self.create_subscription(Path,"/portrait/strokes", self.pen_path_callback,10)
+    
         # Run the drawing function/other functions
         self.go_home()
         time.sleep(2)
         self.draw_rectangle()
-       
+        time.sleep(5)
+        self.draw_portrait()
+
     #------------Load Calibration Data and Draw rectangle frame on paper--------------------------------
     # Extract calibration data from json file (rs2_ws/data/paper_calibration.json)
     def load_calibration(self):
@@ -95,7 +97,6 @@ class MotionNode(Node):
 
         return [p1, p2, p3, p4, p1]  # closed loop
     def draw_rectangle(self):
-
         P1, P2, P3, width, height, x_axis, y_axis, z_axis, quat = self.load_calibration()
         path = self.generate_rectangle(P1, x_axis, y_axis, width, height)
         self.get_logger().info("Drawing rectangle...")
@@ -172,30 +173,172 @@ class MotionNode(Node):
     # )
         self.moveit2.move_to_configuration([1.57, -1.57, 1.57, -1.57, -1.57, 0.0])
         self.moveit2.wait_until_executed()
+    # Visualize the stroke points in RViz
+    def visualize_stroke(self, msg, P1, width, height, x_axis, y_axis):
 
-    def from_home_to_ready(self):
-        self.moveit2.move_to_configuration([-4.71, -1.57, 1.57, -1.57, -1.57, 1.57])
+        marker = Marker()
+        marker.header.frame_id = "base_link"
+        marker.header.stamp = self.get_clock().now().to_msg()
+
+        marker.ns = "stroke_line"
+        marker.id = 30
+        marker.type = Marker.LINE_STRIP   # ✅ CHANGE HERE
+        marker.action = Marker.ADD
+
+        marker.scale.x = 0.003
+
+        marker.color.r = 0.0
+        marker.color.g = 0.0
+        marker.color.b = 1.0
+        marker.color.a = 1.0
+
+        image_width = 1920
+        image_height = 1080
+
+        for pose in msg.poses:
+            u = pose.pose.position.x / image_width
+            v = pose.pose.position.y / image_height
+
+            point = P1 + u * width * x_axis + v * height * y_axis
+
+            pt = Point()
+            pt.x = float(point[0])
+            pt.y = float(point[1])
+            pt.z = float(point[2])
+
+            marker.points.append(pt)
+
+        self.marker_pub.publish(marker)
+        
+    def visualize_start_point(self, point):
+
+        marker = Marker()
+        marker.header.frame_id = "base_link"
+        marker.header.stamp = self.get_clock().now().to_msg()
+
+        marker.ns = "start_point"
+        marker.id = 21
+        marker.type = Marker.SPHERE
+        marker.action = Marker.ADD
+
+        marker.scale.x = 0.03
+        marker.scale.y = 0.03
+        marker.scale.z = 0.03
+
+        marker.color.r = 0.0
+        marker.color.g = 1.0
+        marker.color.b = 0.0
+        marker.color.a = 1.0
+
+        marker.pose.position.x = float(point[0])
+        marker.pose.position.y = float(point[1])
+        marker.pose.position.z = float(point[2])
+
+        self.marker_pub.publish(marker)
     # Callback function for pen path subscriber
     def pen_path_callback(self, msg: Path):
-        self.get_logger().info("Starting drawing...")
-        # FIXED orientation (Z perpendicular to paper)
-        for pose_stamped in msg.poses:
-            pose = pose_stamped.pose
-            position = [
-                pose.position.x,
-                pose.position.y,
-                pose.position.z
-            ]
+        # self.get_logger().info(f"Received stroke with {len(msg.poses)} points")
+        self.stroke_queue.append(msg)
+    def draw_portrait(self):
+
+        self.get_logger().info(f"🔥 START DRAWING {len(self.stroke_queue)} strokes")
+
+        while len(self.stroke_queue) > 0:
+            msg = self.stroke_queue.pop(0)
+            self.draw_stroke(msg)
+        self.get_logger().info("✅ PORTRAIT DONE")
+
+    def draw_stroke(self, msg: Path):
+        P1, P2, P3, width, height, x_axis, y_axis, z_axis, quat = self.load_calibration()
+        image_width = 1920
+        image_height = 1080
+        tcp_offset = 0.12
+        lift_height = 0.02
+        if len(msg.poses) == 0:
+            return
+        # -----------------------------
+        # 1. MOVE ABOVE FIRST POINT
+        # -----------------------------
+        first = msg.poses[0].pose.position
+        self.get_logger().info(f"Moving above first point: ({first.x}, {first.y})")
+        u = first.x / image_width
+        v = first.y / image_height
+        self.get_logger().info(f"Moving above first point after scaling: ({u}, {v})")
+        start_point = P1 + u * width * x_axis + v * height * y_axis
+
+        if z_axis[2] < 0:
+            start_up = start_point - (tcp_offset + lift_height) * z_axis
+        else:
+            start_up = start_point + (tcp_offset + lift_height) * z_axis
+        self.get_logger().info(f"Moving above first point in real world: ({start_up[0]}, {start_up[1]}, {start_up[2]})")
+        self.visualize_start_point(start_up)
+        self.get_logger().info("Started point visualization")    
+        self.moveit2.move_to_pose(
+            position=start_up.tolist(),
+            quat_xyzw=quat,
+            cartesian=True
+        )
+        self.moveit2.wait_until_executed()
+        self.get_logger().info("Reached above first point")
+
+        # -----------------------------
+        # 2. PEN DOWN
+        # -----------------------------
+        if z_axis[2] < 0:
+            start_down = start_point - tcp_offset * z_axis
+        else:
+            start_down = start_point + tcp_offset * z_axis
+
+        self.moveit2.move_to_pose(
+            position=start_down.tolist(),
+            quat_xyzw=quat,
+            cartesian=True
+        )
+        self.moveit2.wait_until_executed()
+
+        # -----------------------------
+        # 3. DRAW CONTINUOUSLY
+        # -----------------------------
+        for pose in msg.poses:
+
+            pixel_x = pose.pose.position.x
+            pixel_y = pose.pose.position.y
+
+            u = pixel_x / image_width
+            v = pixel_y / image_height
+
+            point = P1 + u * width * x_axis + v * height * y_axis
+
+            if z_axis[2] < 0:
+                real_point = point - tcp_offset * z_axis
+            else:
+                real_point = point + tcp_offset * z_axis
+
             self.moveit2.move_to_pose(
-                position=position,
-                quat_xyzw=self.fixed_orientation,
+                position=real_point.tolist(),
+                quat_xyzw=quat,
                 cartesian=True
             )
             self.moveit2.wait_until_executed()
-        self.get_logger().info("Drawing completed")
-        status_msg = String()
-        status_msg.data = "completed"
-        self.status_pub.publish(status_msg)
+            self.visualize_stroke(msg, P1, width, height, x_axis, y_axis)
+
+        # # -----------------------------
+        # # 4. PEN UP AFTER STROKE
+        # # -----------------------------
+        last_point = point
+
+        if z_axis[2] < 0:
+            end_up = last_point - (tcp_offset + lift_height) * z_axis
+        else:
+            end_up = last_point + (tcp_offset + lift_height) * z_axis
+
+        self.moveit2.move_to_pose(
+            position=end_up.tolist(),
+            quat_xyzw=quat,
+            cartesian=True
+        )
+        self.moveit2.wait_until_executed()
+
 
 
 def main():
