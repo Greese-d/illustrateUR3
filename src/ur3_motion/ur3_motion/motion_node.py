@@ -39,22 +39,10 @@ class MotionNode(Node):
         self.moveit2.max_acceleration = 0.05
         self.fixed_orientation = [0.0, 1.0, 0.0, 0.0]   
          # Create subscriber and publisher topic
-        # qos = QoSProfile(
-        #     depth=50,
-        #     reliability=ReliabilityPolicy.RELIABLE,
-        #     durability=DurabilityPolicy.TRANSIENT_LOCAL
-        # )
-
-
         self.marker_pub = self.create_publisher(Marker, "paper_marker", 10)
         self.status_pub = self.create_publisher(String, "/drawing/status", 10)
         self.stroke_queue = []
-        self.create_subscription(
-            Path,
-            "/portrait/strokes",
-            self.pen_path_callback,
-            10
-        )
+        self.create_subscription(Path,"/portrait/strokes", self.pen_path_callback,10)
     
         # Run the drawing function/other functions
         self.go_home()
@@ -261,18 +249,13 @@ class MotionNode(Node):
         self.get_logger().info("✅ PORTRAIT DONE")
 
     def draw_stroke(self, msg: Path):
-
         P1, P2, P3, width, height, x_axis, y_axis, z_axis, quat = self.load_calibration()
-
         image_width = 1920
         image_height = 1080
-
         tcp_offset = 0.12
         lift_height = 0.02
-        
         if len(msg.poses) == 0:
             return
-
         # -----------------------------
         # 1. MOVE ABOVE FIRST POINT
         # -----------------------------
