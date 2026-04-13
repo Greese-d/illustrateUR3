@@ -46,14 +46,15 @@ class MotionNode(Node):
         self.create_subscription(Path,"/portrait/strokes", self.pen_path_callback,10)
     
         # Run the drawing function/other functions
-        time.sleep(10)
+        self.visualize_paper(show_axes=False)
+        time.sleep(5)
         self.go_home()
         time.sleep(2)
         self.draw_rectangle()
         time.sleep(5)
         self.draw_portrait()
 
-    #------------Load Calibration Data and Draw rectangle frame on paper--------------------------------
+#-----------------------1. Load Calibration Data and Draw rectangle frame on paper--------------------------------
     # Extract calibration data from json file (rs2_ws/data/paper_calibration.json)
     def load_calibration(self):
         workspace = os.getcwd()  # assumes running from ~/rs2_ws
@@ -68,6 +69,7 @@ class MotionNode(Node):
 
         width = data["width"]
         height = data["height"]
+        center = np.array(data["center"])
 
         x_axis= np.array(data["x_axis"])
         y_axis= np.array(data["y_axis"])
@@ -81,7 +83,8 @@ class MotionNode(Node):
             orientation["w"]
             ]
     
-        return P1, P2, P3, width, height, x_axis, y_axis, z_axis, quat
+        return P1, P2, P3, width, height, center, x_axis, y_axis, z_axis, quat
+#----------------------- 2. Draw Rectange for checking calibration accuracy--------------------------------------
     def generate_rectangle(self, P1, x_axis, y_axis, width, height, offset=0.01):
 
         # rectangle dimensions
@@ -98,8 +101,9 @@ class MotionNode(Node):
         p4 = origin + h * y_axis
 
         return [p1, p2, p3, p4, p1]  # closed loop
+    
     def draw_rectangle(self):
-        P1, P2, P3, width, height, x_axis, y_axis, z_axis, quat = self.load_calibration()
+        P1, P2, P3, width, height, center, x_axis, y_axis, z_axis, quat = self.load_calibration()
         path = self.generate_rectangle(P1, x_axis, y_axis, width, height)
         self.get_logger().info("Drawing rectangle...")
         tcp_offset= 0.12
@@ -121,21 +125,8 @@ class MotionNode(Node):
             )
             self.moveit2.wait_until_executed()
             self.visualize_rectangle(drawn_path)
-            # if not success:
-            #     self.get_logger().error(f"Failed to move to point: {real_point}")
-            #     self.get_logger().error("Trying to use different orientation...")
-            #     # Try with fixed orientation
-            #     success = self.moveit2.move_to_pose(
-            #         position=real_point.tolist(),
-            #         quat_xyzw=self.fixed_orientation,
-            #         cartesian=True
-            #     )
-            #     self.moveit2.wait_until_executed()
-            #     if not success:
-            #         self.get_logger().error(f"Failed to move to point: {real_point} with fixed orientation")
-                # return
         self.get_logger().info("Rectangle done")
-
+#--------------------------------------- 3. Visualization-----------------------------------------------
     def visualize_rectangle(self, path):
 
         marker = Marker()
@@ -166,15 +157,76 @@ class MotionNode(Node):
 
         self.marker_pub.publish(marker)
 
-    #----------------------------Fundamental Functions----------------------------------------------
-    def go_home(self):
-    #     self.moveit2.move_to_pose(
-    #     position=[0.298, 0.113, 0.312],
-    #     quat_xyzw=self.fixed_orientation,
-    #     cartesian=True
-    # )
-        self.moveit2.move_to_configuration([1.57, -1.57, 1.57, -1.57, -1.57, 0.0])
-        self.moveit2.wait_until_executed()
+    def visualize_paper(self, show_axes= False):
+        P1, P2, P3, width, height, center, x_axis, y_axis, z_axis, quat = self.load_calibration()
+        marker = Marker()
+        marker.header.frame_id = "base_link"
+        marker.header.stamp = self.get_clock().now().to_msg()
+
+        marker.ns = "paper"
+        marker.id = 0
+        marker.type = Marker.CUBE
+        marker.action = Marker.ADD
+
+        marker.pose.position.x = float(center[0])
+        marker.pose.position.y = float(center[1])
+        marker.pose.position.z = float(center[2])
+
+        marker.pose.orientation.x = quat[0]
+        marker.pose.orientation.y = quat[1]
+        marker.pose.orientation.z = quat[2]
+        marker.pose.orientation.w = quat[3]
+
+        marker.scale.x = width
+        marker.scale.y = height
+        marker.scale.z = 0.001
+
+        marker.color.r = 1.0
+        marker.color.g = 1.0
+        marker.color.b = 1.0
+        marker.color.a = 0.9
+
+        self.marker_pub.publish(marker)
+        self.get_logger().info("Paper displayed correctly")
+        
+        # ===== AXES =====
+        if (show_axes==True):
+            axes = [
+                (x_axis, (1, 0, 0), 1),
+                (y_axis, (0, 1, 0), 2),
+                (z_axis, (0, 0, 1), 3),
+            ]
+            for axis, color, mid in axes:
+                m = Marker()
+                m.header.frame_id = "base_link"
+                m.header.stamp = self.get_clock().now().to_msg()
+                m.ns = "axes"
+                m.id = mid
+                m.type = Marker.ARROW
+                m.action = Marker.ADD
+                # m.lifetime = Duration(sec=0)
+            
+                m.points.append(self.to_point(center))
+                m.points.append(self.to_point(center + axis * 0.3))
+
+                m.scale.x = 0.03
+                m.scale.y = 0.06
+                m.scale.z = 0.1
+
+                m.color.r = float(color[0])
+                m.color.g = float(color[1])
+                m.color.b = float(color[2])
+                m.color.a = 1.0
+                self.marker_pub.publish(m)
+            self.get_logger().info("✅ Paper + XYZ axes shown")
+
+    def to_point(self, p):
+        pt = Point()
+        pt.x = float(p[0])
+        pt.y = float(p[1])
+        pt.z = float(p[2])
+        return pt
+    
     # Visualize the stroke points in RViz
     def visualize_stroke_path(self, path):
 
@@ -226,9 +278,9 @@ class MotionNode(Node):
         marker.pose.position.x = float(point[0])
         marker.pose.position.y = float(point[1])
         marker.pose.position.z = float(point[2])
-
         self.marker_pub.publish(marker)
-    # Callback function for pen path subscriber
+
+#------------------------------4. Stroke Subcriber, Start Drawing Portrait---------------------------------------
     def pen_path_callback(self, msg: Path):
         self.get_logger().info(f"Received stroke with {len(msg.poses)} points")
         self.stroke_queue.append(msg)
@@ -240,13 +292,13 @@ class MotionNode(Node):
             msg = self.stroke_queue.pop(0)
             self.draw_stroke(msg)
         self.get_logger().info("✅ PORTRAIT DONE")
-
     def draw_stroke(self, msg: Path):
-        P1, P2, P3, width, height, x_axis, y_axis, z_axis, quat = self.load_calibration()
+        P1, P2, P3, width, height, center, x_axis, y_axis, z_axis, quat = self.load_calibration()
         image_width = 1920
         image_height = 1080
         tcp_offset = 0.12
         lift_height = 0.02
+        scale = 1.5
         if len(msg.poses) == 0:
             return
         # -----------------------------
@@ -257,7 +309,7 @@ class MotionNode(Node):
         u = first.x / image_width
         v = first.y / image_height
         self.get_logger().info(f"Moving above first point after scaling: ({u}, {v})")
-        start_point = P1 + u * width * x_axis + v * height * y_axis
+        start_point = center + scale*(u-0.25) * width * x_axis + scale*(v-0.25) * height * y_axis 
 
         if z_axis[2] < 0:
             start_up = start_point - (tcp_offset + lift_height) * z_axis
@@ -301,7 +353,7 @@ class MotionNode(Node):
             u = pixel_x / image_width
             v = pixel_y / image_height
 
-            point = P1 + u * width * x_axis + v * height * y_axis
+            point = center + scale*(u-0.25) * width * x_axis + scale*(v-0.25) * height * y_axis 
 
             if z_axis[2] < 0:
                 real_point = point - tcp_offset * z_axis
@@ -334,8 +386,15 @@ class MotionNode(Node):
             cartesian=True
         )
         self.moveit2.wait_until_executed()
-
-
+#---------------------------------------------5. Fundamental Functions-------------------------------
+    def go_home(self):
+    #     self.moveit2.move_to_pose(
+    #     position=[0.298, 0.113, 0.312],
+    #     quat_xyzw=self.fixed_orientation,
+    #     cartesian=True
+    # )
+        self.moveit2.move_to_configuration([1.57, -1.57, 1.57, -1.57, -1.57, 0.0])
+        self.moveit2.wait_until_executed()
 
 def main():
 

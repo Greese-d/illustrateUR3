@@ -204,7 +204,7 @@ class CalibrationNode(Node):
 
             # auto visualize
             if all(p is not None for p in self.points):
-                self.visualize_paper()
+                self.get_paper_data()
 
                # preview continuously
         if self.current_index is not None:
@@ -271,7 +271,7 @@ class CalibrationNode(Node):
         self.get_logger().info(f"Saved to {json_path}")
     
     # Visualize the paper as a marker in RViz based on the three points
-    def visualize_paper(self):
+    def get_paper_data(self):
 
         P1, P2, P3 = self.points
 
@@ -306,77 +306,77 @@ class CalibrationNode(Node):
         R_mat = np.column_stack((x_axis, y_axis, z_axis))
         quat = R.from_matrix(R_mat).as_quat()
 
-        marker = Marker()
-        marker.header.frame_id = "base_link"
-        marker.header.stamp = self.get_clock().now().to_msg()
+        # marker = Marker()
+        # marker.header.frame_id = "base_link"
+        # marker.header.stamp = self.get_clock().now().to_msg()
 
-        marker.ns = "paper"
-        marker.id = 0
-        marker.type = Marker.CUBE
-        marker.action = Marker.ADD
+        # marker.ns = "paper"
+        # marker.id = 0
+        # marker.type = Marker.CUBE
+        # marker.action = Marker.ADD
 
-        marker.pose.position.x = float(center[0])
-        marker.pose.position.y = float(center[1])
-        marker.pose.position.z = float(center[2])
+        # marker.pose.position.x = float(center[0])
+        # marker.pose.position.y = float(center[1])
+        # marker.pose.position.z = float(center[2])
 
-        marker.pose.orientation.x = quat[0]
-        marker.pose.orientation.y = quat[1]
-        marker.pose.orientation.z = quat[2]
-        marker.pose.orientation.w = quat[3]
+        # marker.pose.orientation.x = quat[0]
+        # marker.pose.orientation.y = quat[1]
+        # marker.pose.orientation.z = quat[2]
+        # marker.pose.orientation.w = quat[3]
 
-        marker.scale.x = width
-        marker.scale.y = height
-        marker.scale.z = 0.001
+        # marker.scale.x = width
+        # marker.scale.y = height
+        # marker.scale.z = 0.001
 
-        marker.color.r = 1.0
-        marker.color.g = 1.0
-        marker.color.b = 1.0
-        marker.color.a = 0.9
+        # marker.color.r = 1.0
+        # marker.color.g = 1.0
+        # marker.color.b = 1.0
+        # marker.color.a = 0.9
 
-        self.marker_pub.publish(marker)
-        self.get_logger().info("Paper displayed correctly")
+        # self.marker_pub.publish(marker)
+        # self.get_logger().info("Paper displayed correctly")
         
-        # ===== AXES =====
-        axes = [
-            (x_axis, (1, 0, 0), 1),
-            (y_axis, (0, 1, 0), 2),
-            (z_axis, (0, 0, 1), 3),
-        ]
+        # # ===== AXES =====
+        # axes = [
+        #     (x_axis, (1, 0, 0), 1),
+        #     (y_axis, (0, 1, 0), 2),
+        #     (z_axis, (0, 0, 1), 3),
+        # ]
         
-        for axis, color, mid in axes:
-            m = Marker()
-            m.header.frame_id = "base_link"
-            m.header.stamp = self.get_clock().now().to_msg()
-            m.ns = "axes"
-            m.id = mid
-            m.type = Marker.ARROW
-            m.action = Marker.ADD
-            m.lifetime = Duration(sec=0)
+        # for axis, color, mid in axes:
+        #     m = Marker()
+        #     m.header.frame_id = "base_link"
+        #     m.header.stamp = self.get_clock().now().to_msg()
+        #     m.ns = "axes"
+        #     m.id = mid
+        #     m.type = Marker.ARROW
+        #     m.action = Marker.ADD
+        #     m.lifetime = Duration(sec=0)
         
-            m.points.append(self.to_point(center))
-            m.points.append(self.to_point(center + axis * 0.3))
+        #     m.points.append(self.to_point(center))
+        #     m.points.append(self.to_point(center + axis * 0.3))
 
-            m.scale.x = 0.03
-            m.scale.y = 0.06
-            m.scale.z = 0.1
+        #     m.scale.x = 0.03
+        #     m.scale.y = 0.06
+        #     m.scale.z = 0.1
 
-            m.color.r = float(color[0])
-            m.color.g = float(color[1])
-            m.color.b = float(color[2])
-            m.color.a = 1.0
+        #     m.color.r = float(color[0])
+        #     m.color.g = float(color[1])
+        #     m.color.b = float(color[2])
+        #     m.color.a = 1.0
 
-            self.marker_pub.publish(m)
+        #     self.marker_pub.publish(m)
 
-        self.get_logger().info("✅ Paper + XYZ axes shown")
+        # self.get_logger().info("✅ Paper + XYZ axes shown")
 
         self.save_to_json(P1, P2, P3, width, height, center, quat, x_axis, y_axis, z_axis)
 
-    def to_point(self, p):
-        pt = Point()
-        pt.x = float(p[0])
-        pt.y = float(p[1])
-        pt.z = float(p[2])
-        return pt
+    # def to_point(self, p):
+    #     pt = Point()
+    #     pt.x = float(p[0])
+    #     pt.y = float(p[1])
+    #     pt.z = float(p[2])
+    #     return pt
 
 
 def main():
