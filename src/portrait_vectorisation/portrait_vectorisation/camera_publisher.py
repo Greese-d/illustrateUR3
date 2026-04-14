@@ -27,7 +27,14 @@ class CameraPublisher(Node):
 
         self.cap = cv2.VideoCapture(device)
         if not self.cap.isOpened():
-            raise RuntimeError(f"Could not open camera device {device}")
+            self.get_logger().warn(
+                f"Could not open camera device {device}, falling back to device 0"
+            )
+            self.cap.release()
+            device = 0
+            self.cap = cv2.VideoCapture(device)
+            if not self.cap.isOpened():
+                raise RuntimeError("Could not open camera device 0")
 
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
