@@ -22,6 +22,12 @@ def generate_launch_description():
         )
     )
 
+    use_fake_hardware_arg = DeclareLaunchArgument(
+        'use_fake_hardware',
+        default_value='true',
+        description='Set to true to use fake hardware in the UR driver.'
+    )
+
     # -----------------------------
     # UR Robot Driver launch
     # -----------------------------
@@ -36,7 +42,7 @@ def generate_launch_description():
         launch_arguments={
             'ur_type': 'ur3',
             'robot_ip': '192.168.0.195',
-            'use_fake_hardware': 'true',
+            'use_fake_hardware': LaunchConfiguration('use_fake_hardware'),
             'launch_rviz': 'false'
         }.items()
     )
@@ -119,6 +125,7 @@ def generate_launch_description():
     # -----------------------------
     return LaunchDescription([
         launch_camera_arg,
+        use_fake_hardware_arg,
         ur_driver,
         moveit,
         gui_node,
