@@ -19,6 +19,8 @@ class GuiApp:
         self.preview_tk_image = None
         self.live_drawing_tk_image = None
         self.freedrive_on = False
+        self.show_paper_var = tk.BooleanVar(value=True)
+        self.show_axes_var = tk.BooleanVar(value=False)
 
         self.setup_styles()
         self.build_layout()
@@ -245,6 +247,22 @@ class GuiApp:
         )
         self.freedrive_button.grid(row=2, column=1, padx=6, pady=6, sticky="new")
 
+        self.show_paper_check = ttk.Checkbutton(
+            self.calibration_tab,
+            text="Display Paper in Simulation",
+            variable=self.show_paper_var,
+            command=self.on_toggle_show_paper
+        )
+        self.show_paper_check.grid(row=4, column=0, columnspan=2, padx=6, pady=(10, 4), sticky="w")
+
+        self.show_axes_check = ttk.Checkbutton(
+            self.calibration_tab,
+            text="Display Paper XYZ Axes",
+            variable=self.show_axes_var,
+            command=self.on_toggle_show_axes
+        )
+        self.show_axes_check.grid(row=5, column=0, columnspan=2, padx=6, pady=4, sticky="w")
+
         self.preview_notebook.add(self.calibration_tab, text="Calibration")
 
         # =========================
@@ -345,6 +363,24 @@ class GuiApp:
         self.log_box.insert("end", f"{message}\n")
         self.log_box.see("end")
         self.log_box.config(state="disabled")
+
+    def on_toggle_show_paper(self):
+        enabled = self.show_paper_var.get()
+        self.ros_node.toggle_paper_display(enabled)
+
+        state_text = "ON" if enabled else "OFF"
+        self.status_text.config(text=f"Paper display: {state_text}")
+        self.add_log(f"Paper display toggled {state_text}.")
+        self.ros_node.get_logger().info(f"Paper display toggled {state_text}")
+
+    def on_toggle_show_axes(self):
+        enabled = self.show_axes_var.get()
+        self.ros_node.toggle_axes_display(enabled)
+
+        state_text = "ON" if enabled else "OFF"
+        self.status_text.config(text=f"Paper XYZ axes display: {state_text}")
+        self.add_log(f"Paper XYZ axes display toggled {state_text}.")
+        self.ros_node.get_logger().info(f"Paper XYZ axes display toggled {state_text}")
 
     def on_state_update(self, new_state):
         self.state_label.config(text=f"System State: {new_state}")
@@ -496,6 +532,28 @@ class GuiApp:
         self.status_text.config(text="Toggling Free Drive...")
         self.add_log("Sent Free Drive toggle command.")
         self.ros_node.get_logger().info("Sent Free Drive toggle command.")
+
+    def on_toggle_show_paper(self):
+        enabled = self.show_paper_var.get()
+
+        # call into backend / ros bridge
+        self.ros_node.toggle_paper_display(enabled)
+
+        state_text = "ON" if enabled else "OFF"
+        self.status_text.config(text=f"Paper display: {state_text}")
+        self.add_log(f"Paper display toggled {state_text}.")
+        self.ros_node.get_logger().info(f"Paper display toggled {state_text}")
+
+    def on_toggle_show_axes(self):
+        enabled = self.show_axes_var.get()
+
+        # call into backend / ros bridge
+        self.ros_node.toggle_axes_display(enabled)
+
+        state_text = "ON" if enabled else "OFF"
+        self.status_text.config(text=f"Paper XYZ axes display: {state_text}")
+        self.add_log(f"Paper XYZ axes display toggled {state_text}.")
+        self.ros_node.get_logger().info(f"Paper XYZ axes display toggled {state_text}")
 
     def handle_calibration_status(self, msg_data: str):
 

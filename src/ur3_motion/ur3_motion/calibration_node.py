@@ -56,6 +56,8 @@ class CalibrationNode(Node):
 
         self.current_index = None
         self.preview_point = None
+        self.show_paper = True
+        self.show_axes = False
 
         # self.last_key_time = 0
         # self.debounce_time = 0.3
@@ -214,6 +216,26 @@ class CalibrationNode(Node):
                     f"P{self.current_index+1} preview: {pos}"
                 )
 
+        elif msg.data == "show_paper":
+            self.show_paper = True
+            self.update_paper_marker()
+            self.get_logger().info("Show paper enabled")
+
+        elif msg.data == "hide_paper":
+            self.show_paper = False
+            self.update_paper_marker()
+            self.get_logger().info("Show paper disabled")
+
+        elif msg.data == "show_axes":
+            self.show_axes = True
+            self.update_paper_marker()
+            self.get_logger().info("Show axes enabled")
+
+        elif msg.data == "hide_axes":
+            self.show_axes = False
+            self.update_paper_marker()
+            self.get_logger().info("Show axes disabled")
+
     # def reset_calibration(self):
     #     self.points = [None, None, None]
     #     self.current_index = None
@@ -370,6 +392,125 @@ class CalibrationNode(Node):
         # self.get_logger().info("✅ Paper + XYZ axes shown")
 
         self.save_to_json(P1, P2, P3, width, height, center, quat, x_axis, y_axis, z_axis)
+        self.update_paper_marker()
+
+    def to_point(self, p):
+        pt = Point()
+        pt.x = float(p[0])
+        pt.y = float(p[1])
+        pt.z = float(p[2])
+        return pt
+
+
+    def update_paper_marker(self):
+        if not all(p is not None for p in self.points):
+            self.get_logger().warn("Paper/Axes not shown: calibration points incomplete.")
+            return
+
+        P1, P2, P3 = self.points
+
+        x_axis = P2 - P1
+        x_norm = np.linalg.norm(x_axis)
+        if x_norm < 1e-6:
+            self.get_logger().error("P1 and P2 too close!")
+            return
+        x_axis /= x_norm
+
+        y_raw = P3 - P1
+        y_proj = y_raw - np.dot(y_raw, x_axis) * x_axis
+        y_norm = np.linalg.norm(y_proj)
+        if y_norm < 1e-6:
+            self.get_logger().error("Invalid P3 (collinear with P1→P2)")
+            return
+        y_axis = y_proj / y_norm
+
+        z_axis = np.cross(x_axis, y_axis)
+        z_axis /= np.linalg.norm(z_axis)
+
+        width = np.linalg.norm(P2 - P1)
+        height = np.linalg.norm(y_raw)
+        center = P1 + 0.5 * width * x_axis + 0.5 * height * y_axis
+
+        R_mat = np.column_stack((x_axis, y_axis, z_axis))
+        quat = R.from_matrix(R_mat).as_quat()
+
+        # paper
+        if self.show_paper:
+            marker = Marker()
+            marker.header.frame_id = "base_link"
+            marker.header.stamp = self.get_clock().now().to_msg()
+            marker.ns = "paper"
+            marker.id = 0
+            marker.type = Marker.CUBE
+            marker.action = Marker.ADD
+
+            marker.pose.position.x = float(center[0])
+            marker.pose.position.y = float(center[1])
+            marker.pose.position.z = float(center[2])
+
+            marker.pose.orientation.x = float(quat[0])
+            marker.pose.orientation.y = float(quat[1])
+            marker.pose.orientation.z = float(quat[2])
+            marker.pose.orientation.w = float(quat[3])
+
+            marker.scale.x = float(width)
+            marker.scale.y = float(height)
+            marker.scale.z = 0.001
+
+            marker.color.r = 1.0
+            marker.color.g = 1.0
+            marker.color.b = 1.0
+            marker.color.a = 0.9
+
+            self.marker_pub.publish(marker)
+        else:
+            marker = Marker()
+            marker.header.frame_id = "base_link"
+            marker.header.stamp = self.get_clock().now().to_msg()
+            marker.ns = "paper"
+            marker.id = 0
+            marker.action = Marker.DELETE
+            self.marker_pub.publish(marker)
+
+        # axes
+        if self.show_axes:
+            axes = [
+                (x_axis, (1, 0, 0), 1),
+                (y_axis, (0, 1, 0), 2),
+                (z_axis, (0, 0, 1), 3),
+            ]
+
+            for axis, color, mid in axes:
+                m = Marker()
+                m.header.frame_id = "base_link"
+                m.header.stamp = self.get_clock().now().to_msg()
+                m.ns = "axes"
+                m.id = mid
+                m.type = Marker.ARROW
+                m.action = Marker.ADD
+
+                m.points.append(self.to_point(center))
+                m.points.append(self.to_point(center + axis * 0.3))
+
+                m.scale.x = 0.03
+                m.scale.y = 0.06
+                m.scale.z = 0.1
+
+                m.color.r = float(color[0])
+                m.color.g = float(color[1])
+                m.color.b = float(color[2])
+                m.color.a = 1.0
+
+                self.marker_pub.publish(m)
+        else:
+            for mid in [1, 2, 3]:
+                m = Marker()
+                m.header.frame_id = "base_link"
+                m.header.stamp = self.get_clock().now().to_msg()
+                m.ns = "axes"
+                m.id = mid
+                m.action = Marker.DELETE
+                self.marker_pub.publish(m)
 
     # def to_point(self, p):
     #     pt = Point()
