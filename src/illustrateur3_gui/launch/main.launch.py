@@ -103,6 +103,16 @@ def generate_launch_description():
     )
 
     # -----------------------------
+    # Gesture recognizer node
+    # -----------------------------
+    gesture_recognizer = Node(
+        package='gesture_vision',
+        executable='gesture_recognizer',
+        name='gesture_recognizer',
+        output='screen'
+    )
+
+    # -----------------------------
     # Image processing node
     # -----------------------------
     image_processing_node = Node(
@@ -131,5 +141,6 @@ def generate_launch_description():
         gui_node,
         calibration_node,
         camera_publisher,
+        gesture_recognizer,
         image_processing_node,
     ])
