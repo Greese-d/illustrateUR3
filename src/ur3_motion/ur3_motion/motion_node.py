@@ -1,5 +1,8 @@
 
 from asyncio.log import logger
+import threading
+from std_msgs.msg import String
+from std_srvs.srv import Trigger
 
 from geometry_msgs import msg
 import rclpy
@@ -25,9 +28,6 @@ class MotionNode(Node):
     def __init__(self):
         super().__init__("motion_node")
         self.get_logger().info("Motion node ready")
-        # self.tf_buffer = Buffer()
-        # self.tf_listener = TransformListener(self.tf_buffer, self)
-        # self.timer = self.create_timer(1.0, self.print_pose)
         self.moveit2 = MoveIt2(
             node=self,
             joint_names=ur.joint_names(),
@@ -44,16 +44,24 @@ class MotionNode(Node):
         self.stroke_queue = []
         self.stroke_id = 0
         self.create_subscription(Path,"/portrait/strokes", self.pen_path_callback,10)
-    
         # Run the drawing function/other functions
+        self.is_drawing = False
+        self.inactivity_timer = None  # Timer to detect end of stroke messages
+        self.strokes_reported = False  # Flag to report total strokes only once per batch
+        self.start_drawing_srv = self.create_service(
+            Trigger,
+            "/start_drawing",
+            self.handle_start_drawing
+        )
+        self.clear_strokes_srv = self.create_service(
+            Trigger,
+            "/clear_strokes",
+            self.handle_clear_strokes
+        )
         self.visualize_paper(show_axes=False)
-        time.sleep(5)
-        self.go_home()
-        time.sleep(2)
-        self.draw_rectangle()
-        time.sleep(5)
-        self.draw_portrait()
-
+        self.get_logger().info("Motion node waiting for GUI commands...")
+        self.status_pub = self.create_publisher(String, "/drawing/status", 10)
+        self.state_pub = self.create_publisher(String, "/state", 10)
 #-----------------------1. Load Calibration Data and Draw rectangle frame on paper--------------------------------
     # Extract calibration data from json file (rs2_ws/data/paper_calibration.json)
     def load_calibration(self):
@@ -241,9 +249,9 @@ class MotionNode(Node):
 
         marker.scale.x = 0.003
 
-        marker.color.r = 0.0
-        marker.color.g = 0.0
-        marker.color.b = 1.0
+        marker.color.r = 1.0
+        marker.color.g = 1.0
+        marker.color.b = 0.0
         marker.color.a = 1.0
 
         for p in path:
@@ -281,17 +289,41 @@ class MotionNode(Node):
         self.marker_pub.publish(marker)
 
 #------------------------------4. Stroke Subcriber, Start Drawing Portrait---------------------------------------
+    def handle_clear_strokes(self, request, response):
+        if self.is_drawing:
+            response.success = False
+            response.message = "Cannot clear strokes while drawing"
+            return response
+
+        self.stroke_queue.clear()
+        self.stroke_id = 0
+        self.get_logger().info("Cleared portrait strokes")
+
+        response.success = True
+        response.message = "Portrait strokes cleared"
+        return response
     def pen_path_callback(self, msg: Path):
+        if len(self.stroke_queue) == 0:
+            self.strokes_reported = False  # Reset flag for new batch
         self.get_logger().info(f"Received stroke with {len(msg.poses)} points")
         self.stroke_queue.append(msg)
+        # Reset inactivity timer
+        if self.inactivity_timer:
+            self.inactivity_timer.cancel()
+        self.inactivity_timer = threading.Timer(0.1, self.report_stroke_count)
+        self.inactivity_timer.start()
+    def report_stroke_count(self):
+        if not self.strokes_reported:
+            self.get_logger().info(f"Total strokes received: {len(self.stroke_queue)}")
+            self.strokes_reported = True
     def draw_portrait(self):
 
-        self.get_logger().info(f"🔥 START DRAWING {len(self.stroke_queue)} strokes")
+        self.get_logger().info(f"START DRAWING {len(self.stroke_queue)} strokes")
 
         while len(self.stroke_queue) > 0:
             msg = self.stroke_queue.pop(0)
             self.draw_stroke(msg)
-        self.get_logger().info("✅ PORTRAIT DONE")
+        self.get_logger().info("PORTRAIT DONE")
     def draw_stroke(self, msg: Path):
         P1, P2, P3, width, height, center, x_axis, y_axis, z_axis, quat = self.load_calibration()
         image_width = 1920
@@ -396,6 +428,55 @@ class MotionNode(Node):
         self.moveit2.move_to_configuration([1.57, -1.57, 1.57, -1.57, -1.57, 0.0])
         self.moveit2.wait_until_executed()
 
+    def handle_start_drawing(self, request, response):
+        if self.is_drawing:
+            response.success = False
+            response.message = "Robot is already drawing"
+            self.get_logger().warn(response.message)
+            return response
+
+        if len(self.stroke_queue) == 0:
+            response.success = False
+            response.message = "No portrait strokes available. Capture portrait first."
+            self.get_logger().warn(response.message)
+            return response
+
+        self.get_logger().info("Start drawing service called")
+        threading.Thread(target=self.start_drawing_sequence, daemon=True).start()
+
+        response.success = True
+        response.message = "Drawing sequence started"
+        return response
+
+
+    def start_drawing_sequence(self):
+        self.is_drawing = True
+        try:
+            self.state_pub.publish(String(data="DRAWING"))
+            self.status_pub.publish(String(data="Drawing sequence started"))
+
+            self.go_home()
+            time.sleep(1)
+
+            self.draw_rectangle()
+            time.sleep(1)
+
+            self.draw_portrait()
+            time.sleep(1)
+
+            self.go_home()
+            time.sleep(1)
+
+            self.state_pub.publish(String(data="IDLE"))
+            self.status_pub.publish(String(data="Drawing sequence completed"))
+
+        except Exception as e:
+            self.get_logger().error(f"Drawing sequence failed: {e}")
+            self.state_pub.publish(String(data="ERROR"))
+            self.status_pub.publish(String(data=f"Drawing failed: {e}"))
+
+        finally:
+            self.is_drawing = False
 def main():
 
     rclpy.init()

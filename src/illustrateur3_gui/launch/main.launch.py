@@ -129,7 +129,15 @@ def generate_launch_description():
             'stroke_publish_delay': 0.05,
         }]
     )
-
+    # -----------------------------
+    # Motion Node
+    # -----------------------------
+    motion_node = Node(
+        package='ur3_motion',
+        executable='motion_node',
+        name='motion_node',
+        output='screen'
+    )
     # -----------------------------
     # Final LaunchDescription
     # -----------------------------
@@ -143,4 +151,5 @@ def generate_launch_description():
         camera_publisher,
         gesture_recognizer,
         image_processing_node,
+        motion_node,
     ])

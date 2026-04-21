@@ -21,6 +21,7 @@ class GuiApp:
         self.freedrive_on = False
         self.show_paper_var = tk.BooleanVar(value=True)
         self.show_axes_var = tk.BooleanVar(value=False)
+        self.pending_capture = False
 
         self.setup_styles()
         self.build_layout()
@@ -439,12 +440,16 @@ class GuiApp:
         self.ros_node.get_logger().info("Capture Portrait requested")
 
         self.capture_button.config(state="disabled")  # stop double-click spam
-        self.ros_node.create_portrait(self.on_capture_response)  # call ROS service
+        self.pending_capture = True
+        self.ros_node.clear_strokes(self.on_clear_strokes_response)
 
     def on_start(self):
-        self.status_text.config(text="Start drawing requested.")
+        self.status_text.config(text="Start drawing requested...")
         self.add_log("Start Drawing button pressed.")
         self.ros_node.get_logger().info("Start Drawing requested")
+
+        self.start_button.config(state="disabled")
+        self.ros_node.start_drawing(self.on_start_response)
 
     def on_stop(self):
         self.status_text.config(text="Stop drawing requested.")
@@ -585,3 +590,31 @@ class GuiApp:
         else:
             self.add_log("Portrait capture failed.")
             self.update_ui_for_state("ERROR")
+
+    def on_start_response(self, success, message):
+        self.root.after(0, lambda: self._handle_start_response(success, message))
+
+    def _handle_start_response(self, success, message):
+        self.add_log(f"/start_drawing response: success={success}, message='{message}'")
+        self.status_text.config(text=message if message else "Start drawing response received.")
+
+        if success:
+            self.add_log("Drawing sequence accepted by motion node.")
+            self.update_ui_for_state("DRAWING")
+        else:
+            self.add_log("Drawing sequence rejected.")
+            self.start_button.config(state="normal")
+    
+    def on_clear_strokes_response(self, success, message):
+        self.root.after(0, lambda: self._handle_clear_strokes_response(success, message))
+
+    def _handle_clear_strokes_response(self, success, message):
+        self.add_log(f"/clear_strokes response: success={success}, message='{message}'")
+
+        if not success:
+            self.status_text.config(text=message if message else "Failed to clear old strokes.")
+            self.capture_button.config(state="normal")
+            return
+
+        self.status_text.config(text="Capture requested...")
+        self.ros_node.create_portrait(self.on_capture_response)

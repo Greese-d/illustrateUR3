@@ -28,7 +28,12 @@ class GuiNode(Node):
         self.create_portrait_client = self.create_client(
             Trigger, "/create_portrait"
         )
-
+        self.start_drawing_client = self.create_client(
+            Trigger, "/start_drawing"
+        )
+        self.clear_strokes_client = self.create_client(
+            Trigger, "/clear_strokes"
+        )
         self.calibration_status_sub = self.create_subscription(
             String,
             "/calibration/status",
@@ -64,6 +69,7 @@ class GuiNode(Node):
         self.get_logger().info("Publishing to /calibration/command")
         self.get_logger().info("Subscribed to /calibration/status")
         self.get_logger().info("Created client for /create_portrait")
+        self.get_logger().info("Created client for /start_drawing")
 
     def state_callback(self, msg):
         self.current_state = msg.data
@@ -166,3 +172,58 @@ class GuiNode(Node):
                     gui_callback(False, error_msg)
 
         future.add_done_callback(_handle_future_done)
+
+    def start_drawing(self, gui_callback=None):
+        if not self.start_drawing_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().error("/start_drawing service not available")
+            if gui_callback:
+                gui_callback(False, "/start_drawing service not available")
+            return
+
+        request = Trigger.Request()
+        future = self.start_drawing_client.call_async(request)
+
+        def _handle_future_done(fut):
+            try:
+                response = fut.result()
+                success = response.success
+                message = response.message
+                self.get_logger().info(
+                    f"/start_drawing response: success={success}, message='{message}'"
+                )
+                if gui_callback:
+                    gui_callback(success, message)
+            except Exception as e:
+                error_msg = f"/start_drawing call failed: {e}"
+                self.get_logger().error(error_msg)
+                if gui_callback:
+                    gui_callback(False, error_msg)
+
+        future.add_done_callback(_handle_future_done)
+
+    def clear_strokes(self, gui_callback=None):
+        self.get_logger().info("Calling /clear_strokes service...")
+
+        if not self.clear_strokes_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().error("/clear_strokes service not available")
+            if gui_callback:
+                gui_callback(False, "/clear_strokes service not available")
+            return
+
+        request = Trigger.Request()
+        future = self.clear_strokes_client.call_async(request)
+
+        def _done(fut):
+            try:
+                response = fut.result()
+                self.get_logger().info(
+                    f"/clear_strokes response: success={response.success}, message='{response.message}'"
+                )
+                if gui_callback:
+                    gui_callback(response.success, response.message)
+            except Exception as e:
+                self.get_logger().error(f"/clear_strokes failed: {e}")
+                if gui_callback:
+                    gui_callback(False, f"/clear_strokes failed: {e}")
+
+        future.add_done_callback(_done)
