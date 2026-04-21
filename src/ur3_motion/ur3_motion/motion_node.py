@@ -46,6 +46,7 @@ class MotionNode(Node):
         self.create_subscription(Path,"/portrait/strokes", self.pen_path_callback,10)
         # Run the drawing function/other functions
         self.is_drawing = False
+        self.drawing_requested = False
         self.inactivity_timer = None  # Timer to detect end of stroke messages
         self.strokes_reported = False  # Flag to report total strokes only once per batch
         self.start_drawing_srv = self.create_service(
@@ -62,6 +63,9 @@ class MotionNode(Node):
         self.get_logger().info("Motion node waiting for GUI commands...")
         self.status_pub = self.create_publisher(String, "/drawing/status", 10)
         self.state_pub = self.create_publisher(String, "/state", 10)
+
+    def wait_for_motion(self):
+        return self.moveit2.wait_until_executed()
 #-----------------------1. Load Calibration Data and Draw rectangle frame on paper--------------------------------
     # Extract calibration data from json file (rs2_ws/data/paper_calibration.json)
     def load_calibration(self):
@@ -131,7 +135,7 @@ class MotionNode(Node):
                 quat_xyzw=quat,
                 cartesian=True
             )
-            self.moveit2.wait_until_executed()
+            self.wait_for_motion()
             self.visualize_rectangle(drawn_path)
         self.get_logger().info("Rectangle done")
 #--------------------------------------- 3. Visualization-----------------------------------------------
@@ -355,7 +359,7 @@ class MotionNode(Node):
             quat_xyzw=quat,
             cartesian=True
         )
-        self.moveit2.wait_until_executed()
+        self.wait_for_motion()
         self.get_logger().info("Reached above first point")
 
         # -----------------------------
@@ -371,7 +375,7 @@ class MotionNode(Node):
             quat_xyzw=quat,
             cartesian=True
         )
-        self.moveit2.wait_until_executed()
+        self.wait_for_motion()
 
         # -----------------------------
         # 3. DRAW CONTINUOUSLY
@@ -397,7 +401,7 @@ class MotionNode(Node):
                 quat_xyzw=quat,
                 cartesian=True
             )
-            self.moveit2.wait_until_executed()
+            self.wait_for_motion()
             drawn_path.append(point)
             self.visualize_stroke_path(drawn_path)
             self.stroke_id += 1
@@ -417,7 +421,7 @@ class MotionNode(Node):
             quat_xyzw=quat,
             cartesian=True
         )
-        self.moveit2.wait_until_executed()
+        self.wait_for_motion()
 #---------------------------------------------5. Fundamental Functions-------------------------------
     def go_home(self):
     #     self.moveit2.move_to_pose(
@@ -426,12 +430,18 @@ class MotionNode(Node):
     #     cartesian=True
     # )
         self.moveit2.move_to_configuration([1.57, -1.57, 1.57, -1.57, -1.57, 0.0])
-        self.moveit2.wait_until_executed()
+        self.wait_for_motion()
 
     def handle_start_drawing(self, request, response):
         if self.is_drawing:
             response.success = False
             response.message = "Robot is already drawing"
+            self.get_logger().warn(response.message)
+            return response
+
+        if self.drawing_requested:
+            response.success = False
+            response.message = "Drawing sequence is already queued"
             self.get_logger().warn(response.message)
             return response
 
@@ -442,7 +452,7 @@ class MotionNode(Node):
             return response
 
         self.get_logger().info("Start drawing service called")
-        threading.Thread(target=self.start_drawing_sequence, daemon=True).start()
+        self.drawing_requested = True
 
         response.success = True
         response.message = "Drawing sequence started"
@@ -483,6 +493,14 @@ def main():
 
     node = MotionNode()
 
-    rclpy.spin(node)
-
-    rclpy.shutdown()
+    try:
+        while rclpy.ok():
+            rclpy.spin_once(node, timeout_sec=0.1)
+            if node.drawing_requested and not node.is_drawing:
+                node.drawing_requested = False
+                node.start_drawing_sequence()
+    finally:
+        if node.inactivity_timer:
+            node.inactivity_timer.cancel()
+        node.destroy_node()
+        rclpy.shutdown()
