@@ -68,7 +68,8 @@ portrait_vectorisation/
 Install Python dependencies:
 
 ```bash
-pip install opencv-python mediapipe numpy
+pip install opencv-python
+python3 -m pip install --user "numpy==1.26.4" "mediapipe==0.10.13"
 ```
 
 ---
