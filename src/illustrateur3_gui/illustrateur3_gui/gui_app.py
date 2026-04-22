@@ -22,6 +22,7 @@ class GuiApp:
         self.show_paper_var = tk.BooleanVar(value=True)
         self.show_axes_var = tk.BooleanVar(value=False)
         self.pending_capture = False
+        self.go_home_pending = False
 
         self.setup_styles()
         self.build_layout()
@@ -237,8 +238,15 @@ class GuiApp:
             style="Big.TButton",
             command=self.on_confirm
         )
-        # place it in grid
-        self.confirm_button.grid(row=3, column=0, columnspan=2, padx=6, pady=6, sticky="ew")
+        self.confirm_button.grid(row=3, column=0, padx=6, pady=6, sticky="ew")
+
+        self.go_home_button = ttk.Button(
+            self.calibration_tab,
+            text="Go Home",
+            style="Big.TButton",
+            command=self.on_go_home
+        )
+        self.go_home_button.grid(row=3, column=1, padx=6, pady=6, sticky="ew")
 
         self.freedrive_button = ttk.Button(
             self.calibration_tab,
@@ -394,30 +402,42 @@ class GuiApp:
             self.capture_button.config(state="normal")
             self.start_button.config(state="disabled")
             self.stop_button.config(state="disabled")
+            self.go_home_button.config(state="normal")
         elif state == "PREVIEW_READY":
             self.capture_button.config(state="normal")
             self.start_button.config(state="normal")
             self.stop_button.config(state="disabled")
+            self.go_home_button.config(state="normal")
         elif state == "DRAWING":
             self.capture_button.config(state="disabled")
             self.start_button.config(state="disabled")
             self.stop_button.config(state="normal")
+            self.go_home_button.config(state="disabled")
+        elif state == "GOING_HOME":
+            self.capture_button.config(state="disabled")
+            self.start_button.config(state="disabled")
+            self.stop_button.config(state="disabled")
+            self.go_home_button.config(state="disabled")
         elif state == "PROCESSING":
             self.capture_button.config(state="disabled")
             self.start_button.config(state="disabled")
             self.stop_button.config(state="disabled")
+            self.go_home_button.config(state="disabled")
         elif state == "ESTOP":
             self.capture_button.config(state="disabled")
             self.start_button.config(state="disabled")
             self.stop_button.config(state="disabled")
+            self.go_home_button.config(state="disabled")
         elif state == "ERROR":
             self.capture_button.config(state="normal")
             self.start_button.config(state="disabled")
             self.stop_button.config(state="disabled")
+            self.go_home_button.config(state="normal")
         else:
             self.capture_button.config(state="disabled")
             self.start_button.config(state="disabled")
             self.stop_button.config(state="disabled")
+            self.go_home_button.config(state="disabled")
 
     def open_calibration_tab(self):
         self.preview_notebook.select(self.calibration_tab)
@@ -528,6 +548,27 @@ class GuiApp:
         self.status_text.config(text="Confirming calibration point...")
         self.add_log("Confirm button pressed.")
         self.ros_node.get_logger().info("Confirm calibration point")
+
+    def on_go_home(self):
+        self.status_text.config(text="Go Home requested...")
+        self.add_log("Go Home button pressed.")
+        self.ros_node.get_logger().info("Go Home requested")
+
+        self.go_home_pending = True
+        self.go_home_button.config(state="disabled")
+        self.ros_node.go_home(self.on_go_home_response)
+        self.root.after(10000, self.on_go_home_timeout)
+
+    def on_go_home_timeout(self):
+        if not self.go_home_pending:
+            return
+
+        self.go_home_pending = False
+        self.status_text.config(text="Go Home is still waiting for the robot/controller.")
+        self.add_log("Go Home timed out waiting for a backend response.")
+
+        if self.ros_node.current_state != "DRAWING":
+            self.go_home_button.config(state="normal")
         
     def on_toggle_freedrive(self):
         # send command to ROS
@@ -604,6 +645,22 @@ class GuiApp:
         else:
             self.add_log("Drawing sequence rejected.")
             self.start_button.config(state="normal")
+
+    def on_go_home_response(self, success, message):
+        self.root.after(0, lambda: self._handle_go_home_response(success, message))
+
+    def _handle_go_home_response(self, success, message):
+        self.go_home_pending = False
+        self.add_log(f"/go_home response: success={success}, message='{message}'")
+        self.status_text.config(text=message if message else "Go Home response received.")
+
+        if success:
+            self.add_log("Go Home sequence accepted by motion node.")
+            self.go_home_button.config(state="disabled")
+        else:
+            self.add_log("Go Home request rejected or failed.")
+            if self.ros_node.current_state not in ("DRAWING", "GOING_HOME"):
+                self.go_home_button.config(state="normal")
     
     def on_clear_strokes_response(self, success, message):
         self.root.after(0, lambda: self._handle_clear_strokes_response(success, message))

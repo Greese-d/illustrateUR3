@@ -2,7 +2,6 @@ import rclpy
 from rclpy.node import Node
 
 from tf2_ros import Buffer, TransformListener
-from visualization_msgs.msg import Marker
 from scipy.spatial.transform import Rotation as R
 # from ament_index_python.packages import get_package_share_directory
 from pymoveit2 import MoveIt2
@@ -15,8 +14,6 @@ import termios
 import tty
 import time
 import os
-from geometry_msgs.msg import Point
-from builtin_interfaces.msg import Duration
 from std_msgs.msg import String
 # def get_key():
 #     fd = sys.stdin.fileno()
@@ -47,7 +44,6 @@ class CalibrationNode(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        self.marker_pub = self.create_publisher(Marker, "paper_marker", 10)
         self.create_subscription(String, "/calibration/command", self.command_callback, 10)
         self.tcp_offset = 0.12 # length of the pen ( from end-effector to pentip)
 
@@ -56,29 +52,6 @@ class CalibrationNode(Node):
 
         self.current_index = None
         self.preview_point = None
-        self.show_paper = True
-        self.show_axes = False
-
-        # self.last_key_time = 0
-        # self.debounce_time = 0.3
-
-        # self.show_menu()
-        # self.timer = self.create_timer(0.1, self.loop)
-        # self.preview_timer = self.create_timer(0.2, self.preview_loop)
-
-    # def show_menu(self):
-    #     self.get_logger().info("""
-    #     Calibration Started
-    #     -------------------
-    #     1 → Edit P1
-    #     2 → Edit P2
-    #     3 → Edit P3
-
-    #     Move robot → press ENTER to confirm
-
-    #     r → Reset
-    #     q → Quit
-    #     """)
 
     def transform_to_matrix(self, t, q):
         T = np.eye(4)
@@ -112,66 +85,12 @@ class CalibrationNode(Node):
         except Exception as e:
             self.get_logger().warn(f"TF not ready: {e}")
             return None
-
-    # def loop(self):
-    #     key = get_key()
-
-    #     now = time.time()
-    #     if now - self.last_key_time < self.debounce_time:
-    #         return
-
-    #     if key:
-    #         self.last_key_time = now
-    #         self.handle_key(key)
-    
-    # # Handle key inputs for selecting points, confirming positions, resetting, and quitting
-    # def handle_key(self, key):
-    #     # select which point to edit
-    #     if key in ["1", "2", "3"]:
-    #         self.current_index = int(key) - 1
-    #         self.get_logger().info(f"Editing P{key} → move robot, press ENTER")
-
-    #     # confirm
-    #     elif key == "\r" or key == "\n":
-    #         if self.current_index is None:
-    #             self.get_logger().warn("Select point first (1/2/3)")
-    #             return
-
-    #         pos = self.get_pen_tip_position()
-    #         if pos is None:
-    #             return
-
-    #         # overwrite directly (NO append)
-    #         self.points[self.current_index] = pos
-
-    #         self.get_logger().info(
-    #             f"P{self.current_index+1} CONFIRMED: {pos}"
-    #         )
-
-    #         self.current_index = None
-
-    #         # auto visualize
-    #         if all(p is not None for p in self.points):
-    #             self.visualize_paper()
-
-    #     elif key == "r":
-    #         self.reset_calibration()
-
-    #     elif key == "q":
-    #         self.get_logger().info("Exit calibration")
-    #         self.destroy_node()
-    #         rclpy.shutdown()
-
-    #     # preview continuously
-    #     if self.current_index is not None:
-    #         pos = self.get_pen_tip_position()
-    #         if pos is not None:
-    #             self.get_logger().info(
-    #                 f"P{self.current_index+1} preview: {pos}"
-    #             )
                 
     def command_callback(self, msg):
-        if msg.data == "set_p1":
+        if msg.data in ("show_paper", "hide_paper", "show_axes", "hide_axes"):
+            return
+
+        elif msg.data == "set_p1":
             self.current_index = 0
             self.get_logger().info("Editing P1")
 
@@ -215,26 +134,6 @@ class CalibrationNode(Node):
                 self.get_logger().info(
                     f"P{self.current_index+1} preview: {pos}"
                 )
-
-        elif msg.data == "show_paper":
-            self.show_paper = True
-            self.update_paper_marker()
-            self.get_logger().info("Show paper enabled")
-
-        elif msg.data == "hide_paper":
-            self.show_paper = False
-            self.update_paper_marker()
-            self.get_logger().info("Show paper disabled")
-
-        elif msg.data == "show_axes":
-            self.show_axes = True
-            self.update_paper_marker()
-            self.get_logger().info("Show axes enabled")
-
-        elif msg.data == "hide_axes":
-            self.show_axes = False
-            self.update_paper_marker()
-            self.get_logger().info("Show axes disabled")
 
     # def reset_calibration(self):
     #     self.points = [None, None, None]
@@ -327,197 +226,7 @@ class CalibrationNode(Node):
 
         R_mat = np.column_stack((x_axis, y_axis, z_axis))
         quat = R.from_matrix(R_mat).as_quat()
-
-        # marker = Marker()
-        # marker.header.frame_id = "base_link"
-        # marker.header.stamp = self.get_clock().now().to_msg()
-
-        # marker.ns = "paper"
-        # marker.id = 0
-        # marker.type = Marker.CUBE
-        # marker.action = Marker.ADD
-
-        # marker.pose.position.x = float(center[0])
-        # marker.pose.position.y = float(center[1])
-        # marker.pose.position.z = float(center[2])
-
-        # marker.pose.orientation.x = quat[0]
-        # marker.pose.orientation.y = quat[1]
-        # marker.pose.orientation.z = quat[2]
-        # marker.pose.orientation.w = quat[3]
-
-        # marker.scale.x = width
-        # marker.scale.y = height
-        # marker.scale.z = 0.001
-
-        # marker.color.r = 1.0
-        # marker.color.g = 1.0
-        # marker.color.b = 1.0
-        # marker.color.a = 0.9
-
-        # self.marker_pub.publish(marker)
-        # self.get_logger().info("Paper displayed correctly")
-        
-        # # ===== AXES =====
-        # axes = [
-        #     (x_axis, (1, 0, 0), 1),
-        #     (y_axis, (0, 1, 0), 2),
-        #     (z_axis, (0, 0, 1), 3),
-        # ]
-        
-        # for axis, color, mid in axes:
-        #     m = Marker()
-        #     m.header.frame_id = "base_link"
-        #     m.header.stamp = self.get_clock().now().to_msg()
-        #     m.ns = "axes"
-        #     m.id = mid
-        #     m.type = Marker.ARROW
-        #     m.action = Marker.ADD
-        #     m.lifetime = Duration(sec=0)
-        
-        #     m.points.append(self.to_point(center))
-        #     m.points.append(self.to_point(center + axis * 0.3))
-
-        #     m.scale.x = 0.03
-        #     m.scale.y = 0.06
-        #     m.scale.z = 0.1
-
-        #     m.color.r = float(color[0])
-        #     m.color.g = float(color[1])
-        #     m.color.b = float(color[2])
-        #     m.color.a = 1.0
-
-        #     self.marker_pub.publish(m)
-
-        # self.get_logger().info("✅ Paper + XYZ axes shown")
-
         self.save_to_json(P1, P2, P3, width, height, center, quat, x_axis, y_axis, z_axis)
-        self.update_paper_marker()
-
-    def to_point(self, p):
-        pt = Point()
-        pt.x = float(p[0])
-        pt.y = float(p[1])
-        pt.z = float(p[2])
-        return pt
-
-
-    def update_paper_marker(self):
-        if not all(p is not None for p in self.points):
-            self.get_logger().warn("Paper/Axes not shown: calibration points incomplete.")
-            return
-
-        P1, P2, P3 = self.points
-
-        x_axis = P2 - P1
-        x_norm = np.linalg.norm(x_axis)
-        if x_norm < 1e-6:
-            self.get_logger().error("P1 and P2 too close!")
-            return
-        x_axis /= x_norm
-
-        y_raw = P3 - P1
-        y_proj = y_raw - np.dot(y_raw, x_axis) * x_axis
-        y_norm = np.linalg.norm(y_proj)
-        if y_norm < 1e-6:
-            self.get_logger().error("Invalid P3 (collinear with P1→P2)")
-            return
-        y_axis = y_proj / y_norm
-
-        z_axis = np.cross(x_axis, y_axis)
-        z_axis /= np.linalg.norm(z_axis)
-
-        width = np.linalg.norm(P2 - P1)
-        height = np.linalg.norm(y_raw)
-        center = P1 + 0.5 * width * x_axis + 0.5 * height * y_axis
-
-        R_mat = np.column_stack((x_axis, y_axis, z_axis))
-        quat = R.from_matrix(R_mat).as_quat()
-
-        # paper
-        if self.show_paper:
-            marker = Marker()
-            marker.header.frame_id = "base_link"
-            marker.header.stamp = self.get_clock().now().to_msg()
-            marker.ns = "paper"
-            marker.id = 0
-            marker.type = Marker.CUBE
-            marker.action = Marker.ADD
-
-            marker.pose.position.x = float(center[0])
-            marker.pose.position.y = float(center[1])
-            marker.pose.position.z = float(center[2])
-
-            marker.pose.orientation.x = float(quat[0])
-            marker.pose.orientation.y = float(quat[1])
-            marker.pose.orientation.z = float(quat[2])
-            marker.pose.orientation.w = float(quat[3])
-
-            marker.scale.x = float(width)
-            marker.scale.y = float(height)
-            marker.scale.z = 0.001
-
-            marker.color.r = 1.0
-            marker.color.g = 1.0
-            marker.color.b = 1.0
-            marker.color.a = 0.9
-
-            self.marker_pub.publish(marker)
-        else:
-            marker = Marker()
-            marker.header.frame_id = "base_link"
-            marker.header.stamp = self.get_clock().now().to_msg()
-            marker.ns = "paper"
-            marker.id = 0
-            marker.action = Marker.DELETE
-            self.marker_pub.publish(marker)
-
-        # axes
-        if self.show_axes:
-            axes = [
-                (x_axis, (1, 0, 0), 1),
-                (y_axis, (0, 1, 0), 2),
-                (z_axis, (0, 0, 1), 3),
-            ]
-
-            for axis, color, mid in axes:
-                m = Marker()
-                m.header.frame_id = "base_link"
-                m.header.stamp = self.get_clock().now().to_msg()
-                m.ns = "axes"
-                m.id = mid
-                m.type = Marker.ARROW
-                m.action = Marker.ADD
-
-                m.points.append(self.to_point(center))
-                m.points.append(self.to_point(center + axis * 0.3))
-
-                m.scale.x = 0.03
-                m.scale.y = 0.06
-                m.scale.z = 0.1
-
-                m.color.r = float(color[0])
-                m.color.g = float(color[1])
-                m.color.b = float(color[2])
-                m.color.a = 1.0
-
-                self.marker_pub.publish(m)
-        else:
-            for mid in [1, 2, 3]:
-                m = Marker()
-                m.header.frame_id = "base_link"
-                m.header.stamp = self.get_clock().now().to_msg()
-                m.ns = "axes"
-                m.id = mid
-                m.action = Marker.DELETE
-                self.marker_pub.publish(m)
-
-    # def to_point(self, p):
-    #     pt = Point()
-    #     pt.x = float(p[0])
-    #     pt.y = float(p[1])
-    #     pt.z = float(p[2])
-    #     return pt
 
 
 def main():
