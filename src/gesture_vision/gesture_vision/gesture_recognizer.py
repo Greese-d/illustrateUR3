@@ -73,7 +73,7 @@ class GestureRecognizer(Node):
     def __init__(self):
         super().__init__("gesture_recognizer")
 
-        self.declare_parameter("image_topic", "/camera/image_raw")
+        self.declare_parameter("image_topic", "/camera/masked_preview")
         self.declare_parameter("gesture_topic", "/gesture")
         self.declare_parameter("debug_topic", "/gesture/debug_image")
         self.declare_parameter("hold_time", 0.5)
