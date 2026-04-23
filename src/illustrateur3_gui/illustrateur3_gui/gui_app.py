@@ -5,6 +5,7 @@ from PIL import Image as PILImage, ImageTk
 import rclpy
 import cv2
 import json
+import time
 
 class GuiApp:
     def __init__(self, root, ros_node):
@@ -19,6 +20,8 @@ class GuiApp:
         self.preview_tk_image = None
         self.live_drawing_tk_image = None
         self.freedrive_on = False
+        self.last_gesture_time = 0.0
+        self.gesture_cooldown_sec = 2.0
         self.show_paper_var = tk.BooleanVar(value=True)
         self.show_axes_var = tk.BooleanVar(value=False)
 
@@ -29,6 +32,7 @@ class GuiApp:
         self.ros_node.camera_callback_fn = self.on_camera_frame
         self.ros_node.preview_callback_fn = self.on_preview_frame
         self.ros_node.live_drawing_callback_fn = self.on_live_drawing_frame
+        self.ros_node.gesture_callback_fn = self.on_gesture_detected
 
         self.update_ui_for_state("IDLE")
 
@@ -433,13 +437,28 @@ class GuiApp:
         self.status_text.config(text="Live-Drawing view opened.")
         self.add_log("Switched to Live-Drawing view.")
 
-    def on_capture(self):
+    def trigger_capture(self, source="button"):
         self.status_text.config(text="Capture requested...")
-        self.add_log("Capture Portrait button pressed.")
-        self.ros_node.get_logger().info("Capture Portrait requested")
+        self.add_log(f"Capture Portrait requested from {source}.")
+        self.ros_node.get_logger().info(f"Capture Portrait requested from {source}")
 
-        self.capture_button.config(state="disabled")  # stop double-click spam
-        self.ros_node.create_portrait(self.on_capture_response)  # call ROS service
+        self.capture_button.config(state="disabled")
+        self.ros_node.create_portrait(self.on_capture_response)
+
+    def on_capture(self):
+        self.trigger_capture(source="button")
+
+    def on_gesture_detected(self, gesture_name):
+        now = time.time()
+
+        if now - self.last_gesture_time < self.gesture_cooldown_sec:
+            return
+
+        if gesture_name == "thumbs_up":
+            self.last_gesture_time = now
+            self.status_text.config(text="Thumbs up detected. Capturing portrait...")
+            self.add_log("Gesture detected: thumbs_up")
+            self.trigger_capture(source="gesture: thumbs_up")
 
     def on_start(self):
         self.status_text.config(text="Start drawing requested.")

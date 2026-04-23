@@ -20,6 +20,7 @@ class GuiNode(Node):
         self.preview_callback_fn = None
         self.live_drawing_callback_fn = None
         self.calibration_status_callback_fn = None
+        self.gesture_callback_fn = None
 
         self.calibration_pub = self.create_publisher(
             String, "/calibration/command", 10
@@ -57,6 +58,13 @@ class GuiNode(Node):
             10
         )
 
+        self.gesture_sub = self.create_subscription(
+            String,
+            "/gesture",
+            self.gesture_callback,
+            10
+        )
+
         self.get_logger().info("GUI node started")
         self.get_logger().info("Subscribed to /state")
         self.get_logger().info("Subscribed to /camera/image_raw")
@@ -87,6 +95,12 @@ class GuiNode(Node):
                 self.preview_callback_fn(frame_bgr)
         except Exception as e:
             self.get_logger().warn(f"Failed to render preview image: {e}")
+
+    def gesture_callback(self, msg):
+        self.get_logger().info(f"Received gesture: {msg.data}")
+
+        if self.gesture_callback_fn is not None:
+            self.gesture_callback_fn(msg.data)
 
     def calibration_status_callback(self, msg):
         self.get_logger().info(f"Calibration status: {msg.data}")
