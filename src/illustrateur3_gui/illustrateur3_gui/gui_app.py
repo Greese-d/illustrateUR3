@@ -4,7 +4,6 @@ from PIL import Image as PILImage, ImageTk
 
 import rclpy
 import cv2
-import json
 
 class GuiApp:
     def __init__(self, root, ros_node):
@@ -18,7 +17,6 @@ class GuiApp:
         self.camera_tk_image = None
         self.preview_tk_image = None
         self.live_drawing_tk_image = None
-        self.freedrive_on = False
         self.show_paper_var = tk.BooleanVar(value=True)
         self.show_axes_var = tk.BooleanVar(value=False)
         self.pending_capture = False
@@ -177,11 +175,14 @@ class GuiApp:
 
         # Calibration page
         self.calibration_tab = ttk.Frame(self.preview_notebook, padding=10)
-        self.calibration_tab.columnconfigure(0, weight=1)
-        self.calibration_tab.columnconfigure(1, weight=1)
+        self.calibration_tab.columnconfigure(0, weight=1, uniform="calibration")
+        self.calibration_tab.columnconfigure(1, weight=1, uniform="calibration")
         self.calibration_tab.rowconfigure(0, weight=0)
         self.calibration_tab.rowconfigure(1, weight=0)
-        self.calibration_tab.rowconfigure(2, weight=1)
+        self.calibration_tab.rowconfigure(2, weight=0)
+        self.calibration_tab.rowconfigure(3, weight=0)
+        self.calibration_tab.rowconfigure(4, weight=0)
+        self.calibration_tab.rowconfigure(5, weight=0)
 
         self.calibration_title = ttk.Label(
             self.calibration_tab,
@@ -222,7 +223,7 @@ class GuiApp:
             style="Big.TButton",
             command=self.on_point_2
         )
-        self.point2_button.grid(row=1, column=1, padx=6, pady=6, sticky="ew")
+        self.point2_button.grid(row=2, column=0, padx=6, pady=6, sticky="ew")
 
         self.point3_button = ttk.Button(
             self.calibration_tab,
@@ -230,7 +231,7 @@ class GuiApp:
             style="Big.TButton",
             command=self.on_point_3
         )
-        self.point3_button.grid(row=2, column=0, padx=6, pady=6, sticky="new")
+        self.point3_button.grid(row=3, column=0, padx=6, pady=6, sticky="ew")
 
         self.confirm_button = ttk.Button(
             self.calibration_tab,
@@ -238,7 +239,31 @@ class GuiApp:
             style="Big.TButton",
             command=self.on_confirm
         )
-        self.confirm_button.grid(row=3, column=0, padx=6, pady=6, sticky="ew")
+        self.confirm_button.grid(row=4, column=0, padx=6, pady=6, sticky="ew")
+
+        self.pen1_button = ttk.Button(
+            self.calibration_tab,
+            text="Pen 1",
+            style="Big.TButton",
+            command=lambda: self.on_pen_selected(1)
+        )
+        self.pen1_button.grid(row=1, column=1, padx=6, pady=6, sticky="ew")
+
+        self.pen2_button = ttk.Button(
+            self.calibration_tab,
+            text="Pen 2",
+            style="Big.TButton",
+            command=lambda: self.on_pen_selected(2)
+        )
+        self.pen2_button.grid(row=2, column=1, padx=6, pady=6, sticky="ew")
+
+        self.pen3_button = ttk.Button(
+            self.calibration_tab,
+            text="Pen 3",
+            style="Big.TButton",
+            command=lambda: self.on_pen_selected(3)
+        )
+        self.pen3_button.grid(row=3, column=1, padx=6, pady=6, sticky="ew")
 
         self.go_home_button = ttk.Button(
             self.calibration_tab,
@@ -246,15 +271,7 @@ class GuiApp:
             style="Big.TButton",
             command=self.on_go_home
         )
-        self.go_home_button.grid(row=3, column=1, padx=6, pady=6, sticky="ew")
-
-        self.freedrive_button = ttk.Button(
-            self.calibration_tab,
-            text="Free Drive: OFF",
-            style="Big.TButton",
-            command=self.on_toggle_freedrive
-        )
-        self.freedrive_button.grid(row=2, column=1, padx=6, pady=6, sticky="new")
+        self.go_home_button.grid(row=4, column=1, padx=6, pady=6, sticky="ew")
 
         self.show_paper_check = ttk.Checkbutton(
             self.calibration_tab,
@@ -262,7 +279,7 @@ class GuiApp:
             variable=self.show_paper_var,
             command=self.on_toggle_show_paper
         )
-        self.show_paper_check.grid(row=4, column=0, columnspan=2, padx=6, pady=(10, 4), sticky="w")
+        self.show_paper_check.grid(row=5, column=0, columnspan=2, padx=6, pady=(10, 4), sticky="w")
 
         self.show_axes_check = ttk.Checkbutton(
             self.calibration_tab,
@@ -270,7 +287,7 @@ class GuiApp:
             variable=self.show_axes_var,
             command=self.on_toggle_show_axes
         )
-        self.show_axes_check.grid(row=5, column=0, columnspan=2, padx=6, pady=4, sticky="w")
+        self.show_axes_check.grid(row=6, column=0, columnspan=2, padx=6, pady=4, sticky="w")
 
         self.preview_notebook.add(self.calibration_tab, text="Calibration")
 
@@ -569,15 +586,11 @@ class GuiApp:
 
         if self.ros_node.current_state != "DRAWING":
             self.go_home_button.config(state="normal")
-        
-    def on_toggle_freedrive(self):
-        # send command to ROS
-        self.ros_node.toggle_freedrive()
 
-        # temporary feedback (optional)
-        self.status_text.config(text="Toggling Free Drive...")
-        self.add_log("Sent Free Drive toggle command.")
-        self.ros_node.get_logger().info("Sent Free Drive toggle command.")
+    def on_pen_selected(self, pen_index):
+        self.status_text.config(text=f"Pen {pen_index} selected.")
+        self.add_log(f"Pen {pen_index} button pressed.")
+        self.ros_node.get_logger().info(f"Pen {pen_index} selected")
 
     def on_toggle_show_paper(self):
         enabled = self.show_paper_var.get()
@@ -600,23 +613,6 @@ class GuiApp:
         self.status_text.config(text=f"Paper XYZ axes display: {state_text}")
         self.add_log(f"Paper XYZ axes display toggled {state_text}.")
         self.ros_node.get_logger().info(f"Paper XYZ axes display toggled {state_text}")
-
-    def handle_calibration_status(self, msg_data: str):
-
-        try:
-            data = json.loads(msg_data)
-
-            if data.get("command") == "toggle_freedrive":
-                freedrive_on = data.get("freedrive_on", False)
-
-                state_text = "ON" if freedrive_on else "OFF"
-
-                self.freedrive_button.config(text=f"Free Drive: {state_text}")
-                self.status_text.config(text=f"Free Drive is now {state_text}")
-                self.add_log(f"Free Drive is now {state_text}")
-
-        except Exception as e:
-            print(f"Failed to parse calibration status: {e}")
 
     def on_capture_response(self, success, message):
         self.root.after(0, lambda: self._handle_capture_response(success, message))  # safely update Tkinter from callback

@@ -23,7 +23,6 @@ class FakeRosNode:
         self.set_point_2 = MagicMock()
         self.set_point_3 = MagicMock()
         self.send_calibration_command = MagicMock()
-        self.toggle_freedrive = MagicMock()
 
         self._logger = FakeLogger()
 
@@ -60,9 +59,6 @@ class TestGuiApp(unittest.TestCase):
 
         self.app.on_confirm()
         self.ros_node.send_calibration_command.assert_called_once_with("confirm")  # check confirm sends correct command
-
-        self.app.on_toggle_freedrive()
-        self.ros_node.toggle_freedrive.assert_called_once()  # check free drive toggle works
 
     # --------------------------------------------------
     # Test 2: Button state logic

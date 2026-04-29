@@ -14,6 +14,7 @@ from pymoveit2.robots import ur
 from nav_msgs.msg import Path
 from std_msgs.msg import String
 from geometry_msgs.msg import Pose, Point
+from scipy.spatial.transform import Rotation as R
 
 import numpy as np
 import json
@@ -37,7 +38,10 @@ class MotionNode(Node):
         )
         self.moveit2.max_velocity = 0.05
         self.moveit2.max_acceleration = 0.05
-        self.fixed_orientation = [0.0, 1.0, 0.0, 0.0]   
+        self.fixed_orientation = [0.0, 1.0, 0.0, 0.0]
+        self.tcp_offset = 0.12
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
          # Create subscriber and publisher topic
         self.marker_pub = self.create_publisher(Marker, "paper_marker", 10)
         self.status_pub = self.create_publisher(String, "/drawing/status", 10)
@@ -70,12 +74,45 @@ class MotionNode(Node):
             self.handle_clear_strokes
         )
         self.update_paper_display()
+        self.distance_timer = self.create_timer(0.2, self.update_distance_markers)
         self.get_logger().info("Motion node waiting for GUI commands...")
         self.status_pub = self.create_publisher(String, "/drawing/status", 10)
         self.state_pub = self.create_publisher(String, "/state", 10)
 
     def wait_for_motion(self):
         return self.moveit2.wait_until_executed()
+
+    def transform_to_matrix(self, t, q):
+        T = np.eye(4)
+        T[0:3, 3] = [t.x, t.y, t.z]
+        rot = R.from_quat([q.x, q.y, q.z, q.w])
+        T[0:3, 0:3] = rot.as_matrix()
+        return T
+
+    def apply_tcp_offset(self, T):
+        T_offset = np.eye(4)
+        T_offset[2, 3] = self.tcp_offset
+        return T @ T_offset
+
+    def get_tool_and_pen_tip_positions(self):
+        transform = self.tf_buffer.lookup_transform(
+            "base_link",
+            "tool0",
+            rclpy.time.Time()
+        )
+
+        T_tool = self.transform_to_matrix(
+            transform.transform.translation,
+            transform.transform.rotation
+        )
+        T_tip = self.apply_tcp_offset(T_tool)
+
+        return T_tool[0:3, 3], T_tip[0:3, 3]
+
+    def point_to_plane_projection(self, point, plane_point, plane_normal):
+        signed_distance = float(np.dot(point - plane_point, plane_normal))
+        projected_point = point - signed_distance * plane_normal
+        return signed_distance, projected_point
 #-----------------------1. Load Calibration Data and Draw rectangle frame on paper--------------------------------
     # Extract calibration data from json file (rs2_ws/data/paper_calibration.json)
     def load_calibration(self):
@@ -128,14 +165,13 @@ class MotionNode(Node):
         P1, P2, P3, width, height, center, x_axis, y_axis, z_axis, quat = self.load_calibration()
         path = self.generate_rectangle(P1, x_axis, y_axis, width, height)
         self.get_logger().info("Drawing rectangle...")
-        tcp_offset= 0.12
         drawn_path=[]
         for point in path:
             
             if(z_axis[2]<0):
-                real_point = point - tcp_offset*z_axis
+                real_point = point - self.tcp_offset*z_axis
             else:
-                real_point = point + tcp_offset*z_axis
+                real_point = point + self.tcp_offset*z_axis
 
             drawn_path.append(point)
             self.get_logger().info(f"Moving to point: {real_point}")
@@ -213,6 +249,10 @@ class MotionNode(Node):
         for marker_id in (1, 2, 3):
             self.delete_marker("axes", marker_id)
 
+    def delete_distance_markers(self):
+        for marker_id in (100, 101, 102, 103):
+            self.delete_marker("distance", marker_id)
+
     def update_paper_display(self):
         try:
             if self.show_paper or self.show_axes:
@@ -224,6 +264,69 @@ class MotionNode(Node):
             self.delete_paper_markers()
             self.delete_axis_markers()
             self.get_logger().warn(f"Cannot display paper/axes: calibration data is not ready ({e})")
+
+    def create_distance_line_marker(self, marker_id, start, end, color):
+        marker = Marker()
+        marker.header.frame_id = "base_link"
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = "distance"
+        marker.id = marker_id
+        marker.type = Marker.ARROW
+        marker.action = Marker.ADD
+        marker.points = [self.to_point(start), self.to_point(end)]
+        marker.scale.x = 0.008
+        marker.scale.y = 0.015
+        marker.scale.z = 0.02
+        marker.color.r = float(color[0])
+        marker.color.g = float(color[1])
+        marker.color.b = float(color[2])
+        marker.color.a = 1.0
+        return marker
+
+    def create_distance_text_marker(self, marker_id, position, text, color):
+        marker = Marker()
+        marker.header.frame_id = "base_link"
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = "distance"
+        marker.id = marker_id
+        marker.type = Marker.TEXT_VIEW_FACING
+        marker.action = Marker.ADD
+        marker.pose.position = self.to_point(position)
+        marker.pose.orientation.w = 1.0
+        marker.scale.z = 0.018
+        marker.color.r = float(color[0])
+        marker.color.g = float(color[1])
+        marker.color.b = float(color[2])
+        marker.color.a = 1.0
+        marker.text = text
+        return marker
+
+    def update_distance_markers(self):
+        try:
+            P1, _, _, _, _, _, _, _, z_axis, _ = self.load_calibration()
+            tool_position, pen_tip_position = self.get_tool_and_pen_tip_positions()
+        except Exception:
+            self.delete_distance_markers()
+            return
+
+        z_axis = z_axis / np.linalg.norm(z_axis)
+
+        tool_distance, tool_projected = self.point_to_plane_projection(tool_position, P1, z_axis)
+        tip_distance, tip_projected = self.point_to_plane_projection(pen_tip_position, P1, z_axis)
+
+        text_offset = 0.01 * z_axis
+        tool_midpoint = 0.5 * (tool_position + tool_projected) + text_offset
+        tip_midpoint = 0.5 * (pen_tip_position + tip_projected) - text_offset
+
+        markers = [
+            self.create_distance_line_marker(100, pen_tip_position, tip_projected, (0.0, 1.0, 0.0)),
+            self.create_distance_text_marker(101, tip_midpoint, f"Tip {abs(tip_distance):.3f}m", (0.0, 1.0, 0.0)),
+            self.create_distance_line_marker(102, tool_position, tool_projected, (0.0, 0.7, 1.0)),
+            self.create_distance_text_marker(103, tool_midpoint, f"Tool {abs(tool_distance):.3f}m", (0.0, 0.7, 1.0)),
+        ]
+
+        for marker in markers:
+            self.marker_pub.publish(marker)
 
     def visualize_paper(self, show_paper=True, show_axes=False):
         P1, P2, P3, width, height, center, x_axis, y_axis, z_axis, quat = self.load_calibration()
@@ -395,7 +498,7 @@ class MotionNode(Node):
 
     def compute_portrait_mapping(self, strokes):
         P1, P2, P3, width, height, center, x_axis, y_axis, z_axis, quat = self.load_calibration()
-        portrait_scale = 0.82
+        portrait_scale = 0.9
         rotation_degrees = 90.0
         points = [
             (pose.pose.position.x, pose.pose.position.y)
@@ -459,7 +562,6 @@ class MotionNode(Node):
 
     def draw_stroke(self, msg: Path):
         P1, P2, P3, width, height, center, x_axis, y_axis, z_axis, quat = self.load_calibration()
-        tcp_offset = 0.12
         lift_height = 0.02
         if len(msg.poses) == 0:
             return
@@ -472,9 +574,9 @@ class MotionNode(Node):
         start_point = self.pixel_to_paper_point(first.x, first.y, mapping)
 
         if z_axis[2] < 0:
-            start_up = start_point - (tcp_offset + lift_height) * z_axis
+            start_up = start_point - (self.tcp_offset + lift_height) * z_axis
         else:
-            start_up = start_point + (tcp_offset + lift_height) * z_axis
+            start_up = start_point + (self.tcp_offset + lift_height) * z_axis
         self.get_logger().info(f"Moving above first point in real world: ({start_up[0]}, {start_up[1]}, {start_up[2]})")
         # self.visualize_start_point(start_up)
         self.get_logger().info("Started point visualization")    
@@ -490,9 +592,9 @@ class MotionNode(Node):
         # 2. PEN DOWN
         # -----------------------------
         if z_axis[2] < 0:
-            start_down = start_point - tcp_offset * z_axis
+            start_down = start_point - self.tcp_offset * z_axis
         else:
-            start_down = start_point + tcp_offset * z_axis
+            start_down = start_point + self.tcp_offset * z_axis
 
         self.moveit2.move_to_pose(
             position=start_down.tolist(),
@@ -513,9 +615,9 @@ class MotionNode(Node):
             point = self.pixel_to_paper_point(pixel_x, pixel_y, mapping)
 
             if z_axis[2] < 0:
-                real_point = point - tcp_offset * z_axis
+                real_point = point - self.tcp_offset * z_axis
             else:
-                real_point = point + tcp_offset * z_axis
+                real_point = point + self.tcp_offset * z_axis
 
             self.moveit2.move_to_pose(
                 position=real_point.tolist(),
@@ -533,9 +635,9 @@ class MotionNode(Node):
         last_point = point
 
         if z_axis[2] < 0:
-            end_up = last_point - (tcp_offset + lift_height) * z_axis
+            end_up = last_point - (self.tcp_offset + lift_height) * z_axis
         else:
-            end_up = last_point + (tcp_offset + lift_height) * z_axis
+            end_up = last_point + (self.tcp_offset + lift_height) * z_axis
 
         self.moveit2.move_to_pose(
             position=end_up.tolist(),
