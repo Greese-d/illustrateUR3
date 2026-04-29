@@ -122,6 +122,8 @@ class MotionNode(Node):
         with open(json_path, "r") as f:
             data = json.load(f)
 
+        self.tcp_offset = float(data.get("tcp_offset", self.tcp_offset))
+
         P1 = np.array(data["P1"])
         P2 = np.array(data["P2"])
         P3 = np.array(data["P3"])
@@ -216,6 +218,20 @@ class MotionNode(Node):
         self.marker_pub.publish(marker)
 
     def display_command_callback(self, msg):
+        try:
+            data = json.loads(msg.data)
+        except json.JSONDecodeError:
+            data = None
+
+        if isinstance(data, dict) and data.get("command") == "set_tcp_offset":
+            tcp_offset = data.get("tcp_offset")
+            try:
+                self.tcp_offset = float(tcp_offset)
+                self.get_logger().info(f"Updated TCP offset from GUI: {self.tcp_offset:.4f} m")
+            except (TypeError, ValueError):
+                self.get_logger().warn(f"Ignoring invalid TCP offset from GUI: {tcp_offset}")
+            return
+
         if msg.data == "show_paper":
             self.show_paper = True
             self.update_paper_display()

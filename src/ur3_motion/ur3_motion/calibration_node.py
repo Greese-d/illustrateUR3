@@ -45,13 +45,17 @@ class CalibrationNode(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         self.create_subscription(String, "/calibration/command", self.command_callback, 10)
+        self.status_pub = self.create_publisher(String, "/calibration/status", 10)
         self.tcp_offset = 0.12 # length of the pen ( from end-effector to pentip)
 
         # FIX: always fixed size (P1,P2,P3)
         self.points = [None, None, None]
+        self.tool_points = [None, None, None]
 
         self.current_index = None
         self.preview_point = None
+        self.load_existing_calibration()
+        self.publish_tcp_offset_status("startup", recalculated=False)
 
     def transform_to_matrix(self, t, q):
         T = np.eye(4)
@@ -67,26 +71,39 @@ class CalibrationNode(Node):
 
     def get_pen_tip_position(self):
         try:
-            transform = self.tf_buffer.lookup_transform(
-                "base_link",
-                "tool0",
-                rclpy.time.Time()
-            )
-
-            T = self.transform_to_matrix(
-                transform.transform.translation,
-                transform.transform.rotation
-            )
-
-            T_new = self.apply_tcp_offset(T)
-
-            return T_new[0:3, 3]
+            tool_position, pen_tip_position = self.get_tool_and_pen_tip_position()
+            return pen_tip_position
 
         except Exception as e:
             self.get_logger().warn(f"TF not ready: {e}")
             return None
-                
+
+    def get_tool_and_pen_tip_position(self):
+        transform = self.tf_buffer.lookup_transform(
+            "base_link",
+            "tool0",
+            rclpy.time.Time()
+        )
+
+        T = self.transform_to_matrix(
+            transform.transform.translation,
+            transform.transform.rotation
+        )
+
+        T_new = self.apply_tcp_offset(T)
+
+        return T[0:3, 3], T_new[0:3, 3]
+
     def command_callback(self, msg):
+        try:
+            data = json.loads(msg.data)
+        except json.JSONDecodeError:
+            data = None
+
+        if isinstance(data, dict) and data.get("command") == "set_tcp_offset":
+            self.set_tcp_offset(data.get("tcp_offset"))
+            return
+
         if msg.data in ("show_paper", "hide_paper", "show_axes", "hide_axes"):
             return
 
@@ -110,15 +127,18 @@ class CalibrationNode(Node):
                 self.get_logger().warn("Select point first (1/2/3)")
                 return
 
-            pos = self.get_pen_tip_position()
-            if pos is None:
+            try:
+                tool_pos, pen_tip_pos = self.get_tool_and_pen_tip_position()
+            except Exception as e:
+                self.get_logger().warn(f"TF not ready: {e}")
                 return
 
             # overwrite directly (NO append)
-            self.points[self.current_index] = pos
+            self.tool_points[self.current_index] = tool_pos
+            self.points[self.current_index] = pen_tip_pos
 
             self.get_logger().info(
-                f"P{self.current_index+1} CONFIRMED: {pos}"
+                f"P{self.current_index+1} CONFIRMED: {pen_tip_pos}"
             )
 
             self.current_index = None
@@ -161,30 +181,101 @@ class CalibrationNode(Node):
 
         # fallback (just in case)
         return os.path.expanduser("~/data")
-    def save_to_json(self, P1, P2, P3, width, height, center, quat, x_axis, y_axis, z_axis):
-        
+
+    def get_calibration_json_path(self):
         data_dir = self.get_workspace_data_path()
         os.makedirs(data_dir, exist_ok=True)
-         #  File path
-        json_path = os.path.join(data_dir, "paper_calibration.json")
+        return os.path.join(data_dir, "paper_calibration.json")
 
-        data = {
-            "P1": P1.tolist(),
-            "P2": P2.tolist(),
-            "P3": P3.tolist(),
-            "width": float(width),
-            "height": float(height),
-            "center": center.tolist(),
-            "orientation": {
-                "x": float(quat[0]),
-                "y": float(quat[1]),
-                "z": float(quat[2]),
-                "w": float(quat[3]),
-            },
-            "x_axis": x_axis.tolist(),
-            "y_axis": y_axis.tolist(),
-            "z_axis": z_axis.tolist()
+    def load_calibration_file(self):
+        json_path = self.get_calibration_json_path()
+        with open(json_path, "r") as f:
+            return json.load(f)
+
+    def load_existing_calibration(self):
+        try:
+            data = self.load_calibration_file()
+        except (FileNotFoundError, json.JSONDecodeError):
+            return
+
+        self.tcp_offset = float(data.get("tcp_offset", self.tcp_offset))
+
+        if all(key in data for key in ("P1", "P2", "P3")):
+            self.points = [
+                np.array(data["P1"], dtype=float),
+                np.array(data["P2"], dtype=float),
+                np.array(data["P3"], dtype=float),
+            ]
+
+        tool_keys = ["tool_P1", "tool_P2", "tool_P3"]
+        if all(key in data for key in tool_keys):
+            self.tool_points = [np.array(data[key], dtype=float) for key in tool_keys]
+
+    def publish_tcp_offset_status(self, source, recalculated=False, message=None):
+        payload = {
+            "command": "tcp_offset_status",
+            "source": source,
+            "tcp_offset": float(self.tcp_offset),
+            "recalculated": bool(recalculated),
         }
+        if message:
+            payload["message"] = message
+        self.status_pub.publish(String(data=json.dumps(payload)))
+
+    def set_tcp_offset(self, tcp_offset):
+        try:
+            tcp_offset = float(tcp_offset)
+        except (TypeError, ValueError):
+            self.get_logger().warn(f"Invalid tcp_offset received: {tcp_offset}")
+            self.publish_tcp_offset_status("gui", recalculated=False, message="Invalid TCP offset")
+            return
+
+        if tcp_offset <= 0.0:
+            self.get_logger().warn("TCP offset must be positive")
+            self.publish_tcp_offset_status("gui", recalculated=False, message="TCP offset must be positive")
+            return
+
+        self.tcp_offset = tcp_offset
+        self.save_to_json(None, None, None, None, None, None, None, None, None)
+        message = "TCP offset updated. Paper calibration unchanged."
+
+        self.get_logger().info(message)
+        self.publish_tcp_offset_status("gui", recalculated=False, message=message)
+
+    def save_to_json(self, P1, P2, P3, width, height, center, quat, x_axis, y_axis, z_axis):
+        
+        json_path = self.get_calibration_json_path()
+
+        try:
+            data = self.load_calibration_file()
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {}
+
+        data["tcp_offset"] = float(self.tcp_offset)
+
+        if all(point is not None for point in self.tool_points):
+            data["tool_P1"] = self.tool_points[0].tolist()
+            data["tool_P2"] = self.tool_points[1].tolist()
+            data["tool_P3"] = self.tool_points[2].tolist()
+
+        if all(value is not None for value in (P1, P2, P3, width, height, center, quat, x_axis, y_axis, z_axis)):
+            data.update({
+                "P1": P1.tolist(),
+                "P2": P2.tolist(),
+                "P3": P3.tolist(),
+                "width": float(width),
+                "height": float(height),
+                "center": center.tolist(),
+                "orientation": {
+                    "x": float(quat[0]),
+                    "y": float(quat[1]),
+                    "z": float(quat[2]),
+                    "w": float(quat[3]),
+                },
+                "x_axis": x_axis.tolist(),
+                "y_axis": y_axis.tolist(),
+                "z_axis": z_axis.tolist()
+            })
 
         with open(json_path, "w") as f:
             json.dump(data, f, indent=4)

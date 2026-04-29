@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 from PIL import Image as PILImage, ImageTk
+import json
 
 import rclpy
 import cv2
@@ -19,6 +20,7 @@ class GuiApp:
         self.live_drawing_tk_image = None
         self.show_paper_var = tk.BooleanVar(value=True)
         self.show_axes_var = tk.BooleanVar(value=False)
+        self.tcp_offset_var = tk.StringVar(value="0.12")
         self.pending_capture = False
         self.go_home_pending = False
 
@@ -29,6 +31,7 @@ class GuiApp:
         self.ros_node.camera_callback_fn = self.on_camera_frame
         self.ros_node.preview_callback_fn = self.on_preview_frame
         self.ros_node.live_drawing_callback_fn = self.on_live_drawing_frame
+        self.ros_node.calibration_status_callback_fn = self.on_calibration_status
 
         self.update_ui_for_state("IDLE")
 
@@ -126,7 +129,8 @@ class GuiApp:
         self.preview_header.columnconfigure(0, weight=0)
         self.preview_header.columnconfigure(1, weight=0)
         self.preview_header.columnconfigure(2, weight=0)
-        self.preview_header.columnconfigure(3, weight=1)
+        self.preview_header.columnconfigure(3, weight=0)
+        self.preview_header.columnconfigure(4, weight=1)
 
         self.preview_button = ttk.Button(
             self.preview_header,
@@ -151,6 +155,14 @@ class GuiApp:
             command=self.open_live_drawing_tab
         )
         self.live_drawing_button.grid(row=0, column=2, padx=(6, 0), sticky="w")
+
+        self.settings_button = ttk.Button(
+            self.preview_header,
+            text="Settings",
+            style="TabSwitch.TButton",
+            command=self.open_settings_tab
+        )
+        self.settings_button.grid(row=0, column=3, padx=(6, 0), sticky="w")
 
         self.preview_notebook = ttk.Notebook(self.preview_frame)
         self.preview_notebook.grid(row=1, column=0, sticky="nsew")
@@ -183,7 +195,7 @@ class GuiApp:
         self.calibration_tab.rowconfigure(3, weight=0)
         self.calibration_tab.rowconfigure(4, weight=0)
         self.calibration_tab.rowconfigure(5, weight=0)
-
+        self.calibration_tab.rowconfigure(6, weight=0)
         self.calibration_title = ttk.Label(
             self.calibration_tab,
             text="Calibration Tools",
@@ -290,6 +302,44 @@ class GuiApp:
         self.show_axes_check.grid(row=6, column=0, columnspan=2, padx=6, pady=4, sticky="w")
 
         self.preview_notebook.add(self.calibration_tab, text="Calibration")
+
+        # Settings page
+        self.settings_tab = ttk.Frame(self.preview_notebook, padding=10)
+        self.settings_tab.columnconfigure(0, weight=0)
+        self.settings_tab.columnconfigure(1, weight=0)
+        self.settings_tab.columnconfigure(2, weight=1)
+
+        self.settings_title = ttk.Label(
+            self.settings_tab,
+            text="Settings",
+            style="Heading.TLabel"
+        )
+        self.settings_title.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
+
+        self.tcp_offset_label = ttk.Label(
+            self.settings_tab,
+            text="TCP Offset (m)",
+            style="Status.TLabel"
+        )
+        self.tcp_offset_label.grid(row=1, column=0, padx=(6, 8), pady=6, sticky="w")
+
+        self.tcp_offset_entry = ttk.Entry(
+            self.settings_tab,
+            textvariable=self.tcp_offset_var,
+            width=12
+        )
+        self.tcp_offset_entry.grid(row=1, column=1, padx=(0, 6), pady=6, sticky="w", ipady=7)
+
+        self.tcp_offset_send_button = ttk.Button(
+            self.settings_tab,
+            text="Send",
+            style="Big.TButton",
+            command=self.on_send_tcp_offset,
+            width=12
+        )
+        self.tcp_offset_send_button.grid(row=1, column=2, padx=(0, 6), pady=6, sticky="w")
+
+        self.preview_notebook.add(self.settings_tab, text="Settings")
 
         # =========================
         # Bottom Area
@@ -471,6 +521,11 @@ class GuiApp:
         self.status_text.config(text="Live-Drawing view opened.")
         self.add_log("Switched to Live-Drawing view.")
 
+    def open_settings_tab(self):
+        self.preview_notebook.select(self.settings_tab)
+        self.status_text.config(text="Settings view opened.")
+        self.add_log("Switched to Settings view.")
+
     def on_capture(self):
         self.status_text.config(text="Capture requested...")
         self.add_log("Capture Portrait button pressed.")
@@ -591,6 +646,40 @@ class GuiApp:
         self.status_text.config(text=f"Pen {pen_index} selected.")
         self.add_log(f"Pen {pen_index} button pressed.")
         self.ros_node.get_logger().info(f"Pen {pen_index} selected")
+
+    def on_send_tcp_offset(self):
+        raw_value = self.tcp_offset_var.get().strip()
+        try:
+            tcp_offset = float(raw_value)
+        except ValueError:
+            self.status_text.config(text="TCP offset must be a number.")
+            self.add_log(f"Rejected TCP offset input: '{raw_value}'")
+            return
+
+        if tcp_offset <= 0.0:
+            self.status_text.config(text="TCP offset must be positive.")
+            self.add_log(f"Rejected non-positive TCP offset: {tcp_offset}")
+            return
+
+        self.ros_node.set_tcp_offset(tcp_offset)
+        self.status_text.config(text=f"Sending TCP offset: {tcp_offset:.4f} m")
+        self.add_log(f"Sent TCP offset {tcp_offset:.4f} m to calibration and motion nodes.")
+        self.ros_node.get_logger().info(f"Sent TCP offset {tcp_offset:.4f} m")
+
+    def on_calibration_status(self, msg_data):
+        try:
+            data = json.loads(msg_data)
+        except json.JSONDecodeError:
+            return
+
+        if "tcp_offset" in data:
+            tcp_offset = float(data["tcp_offset"])
+            self.tcp_offset_var.set(f"{tcp_offset:.4f}")
+
+        if data.get("command") == "tcp_offset_status":
+            message = data.get("message", f"TCP offset is {float(data['tcp_offset']):.4f} m")
+            self.status_text.config(text=message)
+            self.add_log(message)
 
     def on_toggle_show_paper(self):
         enabled = self.show_paper_var.get()

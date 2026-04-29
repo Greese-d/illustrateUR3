@@ -13,7 +13,7 @@ class GuiNode(Node):
         super().__init__("illustrateur3_gui_node")
 
         self.current_state = "IDLE"
-        self.freedrive_on = False
+        self.tcp_offset = 0.12
 
         self.state_callback_fn = None
         self.camera_callback_fn = None
@@ -104,8 +104,8 @@ class GuiNode(Node):
         try:
             data = json.loads(msg.data)
 
-            if "freedrive_on" in data:
-                self.freedrive_on = data["freedrive_on"]
+            if "tcp_offset" in data:
+                self.tcp_offset = float(data["tcp_offset"])
 
         except Exception as e:
             self.get_logger().warn(f"Failed to parse calibration status JSON: {e}")
@@ -119,6 +119,12 @@ class GuiNode(Node):
         self.calibration_pub.publish(msg)
         self.get_logger().info(f"Published calibration command: {command}")
 
+    def send_calibration_payload(self, payload: dict):
+        msg = String()
+        msg.data = json.dumps(payload)
+        self.calibration_pub.publish(msg)
+        self.get_logger().info(f"Published calibration payload: {msg.data}")
+
     def set_point_1(self):
         self.send_calibration_command("set_p1")
 
@@ -131,8 +137,14 @@ class GuiNode(Node):
     def on_confirm(self):
         self.send_calibration_command("confirm")
 
-    def toggle_freedrive(self):
-        self.send_calibration_command("toggle_freedrive")
+    def set_tcp_offset(self, tcp_offset: float):
+        self.tcp_offset = float(tcp_offset)
+        self.send_calibration_payload(
+            {
+                "command": "set_tcp_offset",
+                "tcp_offset": self.tcp_offset,
+            }
+        )
 
     def toggle_paper_display(self, enabled: bool):
         self.send_calibration_command("show_paper" if enabled else "hide_paper")
