@@ -164,6 +164,47 @@ class GuiNode(Node):
             }
         )
 
+    def move_vertical(self, dist: float):
+        self.send_calibration_payload(
+            {
+                "command": "move_vertical",
+                "dist": float(dist),
+            }
+        )
+
+    def rotate_end_effector(self, angle: float, degrees: bool = True):
+        self.send_calibration_payload(
+            {
+                "command": "rotate_end_effector",
+                "angle": float(angle),
+                "degrees": bool(degrees),
+            }
+        )
+
+    def save_pen_ready_pose(self, pen_index: int):
+        self.send_calibration_payload(
+            {
+                "command": "save_pen_ready_pose",
+                "pen": int(pen_index),
+            }
+        )
+
+    def attach_pen(self, pen_index: int):
+        self.send_calibration_payload(
+            {
+                "command": "attach_pen",
+                "pen": int(pen_index),
+            }
+        )
+
+    def disassemble_pen(self, pen_index: int):
+        self.send_calibration_payload(
+            {
+                "command": "disassemble_pen",
+                "pen": int(pen_index),
+            }
+        )
+
     def toggle_paper_display(self, enabled: bool):
         self.send_calibration_command("show_paper" if enabled else "hide_paper")
 

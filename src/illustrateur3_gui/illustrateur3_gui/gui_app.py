@@ -24,6 +24,8 @@ class GuiApp:
         self.show_paper_var = tk.BooleanVar(value=True)
         self.show_axes_var = tk.BooleanVar(value=False)
         self.tcp_offset_var = tk.StringVar(value="0.12")
+        self.move_vertical_var = tk.StringVar(value="0.02")
+        self.rotate_end_effector_var = tk.StringVar(value="90")
         self.pending_capture = False
         self.go_home_pending = False
         self.stop_pending = False
@@ -347,6 +349,52 @@ class GuiApp:
         )
         self.tcp_offset_send_button.grid(row=1, column=2, padx=(0, 6), pady=6, sticky="w")
 
+        self.move_vertical_label = ttk.Label(
+            self.settings_tab,
+            text="Move Vertical (m)",
+            style="Status.TLabel"
+        )
+        self.move_vertical_label.grid(row=2, column=0, padx=(6, 8), pady=6, sticky="w")
+
+        self.move_vertical_entry = ttk.Entry(
+            self.settings_tab,
+            textvariable=self.move_vertical_var,
+            width=12
+        )
+        self.move_vertical_entry.grid(row=2, column=1, padx=(0, 6), pady=6, sticky="w", ipady=7)
+
+        self.move_vertical_send_button = ttk.Button(
+            self.settings_tab,
+            text="Send",
+            style="Big.TButton",
+            command=self.on_send_move_vertical,
+            width=12
+        )
+        self.move_vertical_send_button.grid(row=2, column=2, padx=(0, 6), pady=6, sticky="w")
+
+        self.rotate_end_effector_label = ttk.Label(
+            self.settings_tab,
+            text="Rotate End Effector (deg)",
+            style="Status.TLabel"
+        )
+        self.rotate_end_effector_label.grid(row=3, column=0, padx=(6, 8), pady=6, sticky="w")
+
+        self.rotate_end_effector_entry = ttk.Entry(
+            self.settings_tab,
+            textvariable=self.rotate_end_effector_var,
+            width=12
+        )
+        self.rotate_end_effector_entry.grid(row=3, column=1, padx=(0, 6), pady=6, sticky="w", ipady=7)
+
+        self.rotate_end_effector_send_button = ttk.Button(
+            self.settings_tab,
+            text="Send",
+            style="Big.TButton",
+            command=self.on_send_rotate_end_effector,
+            width=12
+        )
+        self.rotate_end_effector_send_button.grid(row=3, column=2, padx=(0, 6), pady=6, sticky="w")
+
         self.preview_notebook.add(self.settings_tab, text="Settings")
 
         # =========================
@@ -485,41 +533,65 @@ class GuiApp:
             )
             self.stop_button.config(state="disabled")
             self.go_home_button.config(state="normal")
+            self.tcp_offset_send_button.config(state="normal")
+            self.move_vertical_send_button.config(state="normal")
+            self.rotate_end_effector_send_button.config(state="normal")
         elif state == "PREVIEW_READY":
             self.capture_button.config(state="normal")
             self.start_button.config(state="normal")
             self.stop_button.config(state="disabled")
             self.go_home_button.config(state="normal")
+            self.tcp_offset_send_button.config(state="normal")
+            self.move_vertical_send_button.config(state="normal")
+            self.rotate_end_effector_send_button.config(state="normal")
         elif state == "DRAWING":
             self.capture_button.config(state="disabled")
             self.start_button.config(state="disabled")
             self.stop_button.config(state="normal")
             self.go_home_button.config(state="disabled")
+            self.tcp_offset_send_button.config(state="disabled")
+            self.move_vertical_send_button.config(state="disabled")
+            self.rotate_end_effector_send_button.config(state="disabled")
         elif state == "GOING_HOME":
             self.capture_button.config(state="disabled")
             self.start_button.config(state="disabled")
             self.stop_button.config(state="disabled")
             self.go_home_button.config(state="disabled")
+            self.tcp_offset_send_button.config(state="disabled")
+            self.move_vertical_send_button.config(state="disabled")
+            self.rotate_end_effector_send_button.config(state="disabled")
         elif state == "PROCESSING":
             self.capture_button.config(state="disabled")
             self.start_button.config(state="disabled")
             self.stop_button.config(state="disabled")
             self.go_home_button.config(state="disabled")
+            self.tcp_offset_send_button.config(state="disabled")
+            self.move_vertical_send_button.config(state="disabled")
+            self.rotate_end_effector_send_button.config(state="disabled")
         elif state == "ESTOP":
             self.capture_button.config(state="disabled")
             self.start_button.config(state="disabled")
             self.stop_button.config(state="disabled")
             self.go_home_button.config(state="disabled")
+            self.tcp_offset_send_button.config(state="disabled")
+            self.move_vertical_send_button.config(state="disabled")
+            self.rotate_end_effector_send_button.config(state="disabled")
         elif state == "ERROR":
             self.capture_button.config(state="normal")
             self.start_button.config(state="disabled")
             self.stop_button.config(state="disabled")
             self.go_home_button.config(state="normal")
+            self.tcp_offset_send_button.config(state="normal")
+            self.move_vertical_send_button.config(state="normal")
+            self.rotate_end_effector_send_button.config(state="normal")
         else:
             self.capture_button.config(state="disabled")
             self.start_button.config(state="disabled")
             self.stop_button.config(state="disabled")
             self.go_home_button.config(state="disabled")
+            self.tcp_offset_send_button.config(state="disabled")
+            self.move_vertical_send_button.config(state="disabled")
+            self.rotate_end_effector_send_button.config(state="disabled")
 
     def open_calibration_tab(self):
         self.preview_notebook.select(self.calibration_tab)
@@ -679,9 +751,10 @@ class GuiApp:
             self.go_home_button.config(state="normal")
 
     def on_pen_selected(self, pen_index):
-        self.status_text.config(text=f"Pen {pen_index} selected.")
-        self.add_log(f"Pen {pen_index} button pressed.")
-        self.ros_node.get_logger().info(f"Pen {pen_index} selected")
+        self.ros_node.save_pen_ready_pose(pen_index)
+        self.status_text.config(text=f"Saving Pen {pen_index} ready pose...")
+        self.add_log(f"Pen {pen_index} ready pose save requested.")
+        self.ros_node.get_logger().info(f"Pen {pen_index} ready pose save requested")
 
     def on_send_tcp_offset(self):
         raw_value = self.tcp_offset_var.get().strip()
@@ -701,6 +774,36 @@ class GuiApp:
         self.status_text.config(text=f"Sending TCP offset: {tcp_offset:.4f} m")
         self.add_log(f"Sent TCP offset {tcp_offset:.4f} m to calibration and motion nodes.")
         self.ros_node.get_logger().info(f"Sent TCP offset {tcp_offset:.4f} m")
+
+    def on_send_move_vertical(self):
+        raw_value = self.move_vertical_var.get().strip()
+        try:
+            dist = float(raw_value)
+        except ValueError:
+            self.status_text.config(text="Move vertical distance must be a number.")
+            self.add_log(f"Rejected move vertical input: '{raw_value}'")
+            return
+
+        self.ros_node.move_vertical(dist)
+        direction = "up" if dist >= 0 else "down"
+        self.status_text.config(text=f"Moving {direction} by {abs(dist):.4f} m")
+        self.add_log(f"Sent move vertical command: {dist:.4f} m.")
+        self.ros_node.get_logger().info(f"Sent move vertical command: {dist:.4f} m")
+
+    def on_send_rotate_end_effector(self):
+        raw_value = self.rotate_end_effector_var.get().strip()
+        try:
+            angle = float(raw_value)
+        except ValueError:
+            self.status_text.config(text="End-effector rotation must be a number.")
+            self.add_log(f"Rejected end-effector rotation input: '{raw_value}'")
+            return
+
+        self.ros_node.rotate_end_effector(angle, degrees=True)
+        direction = "positive" if angle >= 0 else "negative"
+        self.status_text.config(text=f"Rotating end effector {direction} by {abs(angle):.2f} deg")
+        self.add_log(f"Sent end-effector rotation command: {angle:.2f} deg.")
+        self.ros_node.get_logger().info(f"Sent end-effector rotation command: {angle:.2f} deg")
 
     def on_calibration_status(self, msg_data):
         try:
