@@ -46,7 +46,7 @@ class CalibrationNode(Node):
 
         self.create_subscription(String, "/calibration/command", self.command_callback, 10)
         self.status_pub = self.create_publisher(String, "/calibration/status", 10)
-        self.tcp_offset = 0.12 # length of the pen ( from end-effector to pentip)
+        self.tcp_offset = 0.17 # length of the pen ( from end-effector to pentip)
 
         # FIX: always fixed size (P1,P2,P3)
         self.points = [None, None, None]

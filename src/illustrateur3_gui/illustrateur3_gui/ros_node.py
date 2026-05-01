@@ -31,6 +31,9 @@ class GuiNode(Node):
         self.start_drawing_client = self.create_client(
             Trigger, "/start_drawing"
         )
+        self.stop_drawing_client = self.create_client(
+            Trigger, "/stop_drawing"
+        )
         self.go_home_client = self.create_client(
             Trigger, "/go_home"
         )
@@ -73,6 +76,7 @@ class GuiNode(Node):
         self.get_logger().info("Subscribed to /calibration/status")
         self.get_logger().info("Created client for /create_portrait")
         self.get_logger().info("Created client for /start_drawing")
+        self.get_logger().info("Created client for /stop_drawing")
         self.get_logger().info("Created client for /go_home")
 
     def state_callback(self, msg):
@@ -217,6 +221,34 @@ class GuiNode(Node):
                     gui_callback(success, message)
             except Exception as e:
                 error_msg = f"/start_drawing call failed: {e}"
+                self.get_logger().error(error_msg)
+                if gui_callback:
+                    gui_callback(False, error_msg)
+
+        future.add_done_callback(_handle_future_done)
+
+    def stop_drawing(self, gui_callback=None):
+        if not self.stop_drawing_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().error("/stop_drawing service not available")
+            if gui_callback:
+                gui_callback(False, "/stop_drawing service not available")
+            return
+
+        request = Trigger.Request()
+        future = self.stop_drawing_client.call_async(request)
+
+        def _handle_future_done(fut):
+            try:
+                response = fut.result()
+                success = response.success
+                message = response.message
+                self.get_logger().info(
+                    f"/stop_drawing response: success={success}, message='{message}'"
+                )
+                if gui_callback:
+                    gui_callback(success, message)
+            except Exception as e:
+                error_msg = f"/stop_drawing call failed: {e}"
                 self.get_logger().error(error_msg)
                 if gui_callback:
                     gui_callback(False, error_msg)

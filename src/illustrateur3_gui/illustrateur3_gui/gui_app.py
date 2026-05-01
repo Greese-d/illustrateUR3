@@ -23,6 +23,10 @@ class GuiApp:
         self.tcp_offset_var = tk.StringVar(value="0.12")
         self.pending_capture = False
         self.go_home_pending = False
+        self.stop_pending = False
+        self.can_start_drawing = False
+        self.resume_available = False
+        self.displayed_state = "IDLE"
 
         self.setup_styles()
         self.build_layout()
@@ -459,15 +463,22 @@ class GuiApp:
         self.ros_node.get_logger().info(f"Paper XYZ axes display toggled {state_text}")
 
     def on_state_update(self, new_state):
+        previous_state = self.displayed_state
+        if new_state == "IDLE" and previous_state == "DRAWING":
+            self.can_start_drawing = self.stop_pending or self.resume_available
+
         self.state_label.config(text=f"System State: {new_state}")
         self.status_text.config(text=f"Backend state changed to: {new_state}")
         self.add_log(f"State update received: {new_state}")
         self.update_ui_for_state(new_state)
+        self.displayed_state = new_state
 
     def update_ui_for_state(self, state):
         if state == "IDLE":
             self.capture_button.config(state="normal")
-            self.start_button.config(state="disabled")
+            self.start_button.config(
+                state="normal" if self.can_start_drawing else "disabled"
+            )
             self.stop_button.config(state="disabled")
             self.go_home_button.config(state="normal")
         elif state == "PREVIEW_READY":
@@ -531,6 +542,8 @@ class GuiApp:
         self.add_log("Capture Portrait button pressed.")
         self.ros_node.get_logger().info("Capture Portrait requested")
 
+        self.can_start_drawing = False
+        self.resume_available = False
         self.capture_button.config(state="disabled")  # stop double-click spam
         self.pending_capture = True
         self.ros_node.clear_strokes(self.on_clear_strokes_response)
@@ -547,6 +560,10 @@ class GuiApp:
         self.status_text.config(text="Stop drawing requested.")
         self.add_log("Stop Drawing button pressed.")
         self.ros_node.get_logger().info("Stop Drawing requested")
+        self.stop_pending = True
+        self.resume_available = True
+        self.stop_button.config(state="disabled")
+        self.ros_node.stop_drawing(self.on_stop_response)
 
     def on_estop(self):
         self.status_text.config(text="Emergency stop requested.")
@@ -711,11 +728,15 @@ class GuiApp:
         self.status_text.config(text=message if message else "Portrait capture completed.")  # show backend message
 
         if success:
+            self.can_start_drawing = True
             self.add_log("Portrait capture succeeded.")
             self.update_ui_for_state("PREVIEW_READY")
+            self.displayed_state = "PREVIEW_READY"
         else:
+            self.can_start_drawing = False
             self.add_log("Portrait capture failed.")
             self.update_ui_for_state("ERROR")
+            self.displayed_state = "ERROR"
 
     def on_start_response(self, success, message):
         self.root.after(0, lambda: self._handle_start_response(success, message))
@@ -726,10 +747,31 @@ class GuiApp:
 
         if success:
             self.add_log("Drawing sequence accepted by motion node.")
+            self.resume_available = False
             self.update_ui_for_state("DRAWING")
+            self.displayed_state = "DRAWING"
         else:
             self.add_log("Drawing sequence rejected.")
             self.start_button.config(state="normal")
+
+    def on_stop_response(self, success, message):
+        self.root.after(0, lambda: self._handle_stop_response(success, message))
+
+    def _handle_stop_response(self, success, message):
+        self.stop_pending = False
+        self.add_log(f"/stop_drawing response: success={success}, message='{message}'")
+        self.status_text.config(text=message if message else "Stop drawing response received.")
+
+        if success:
+            self.can_start_drawing = True
+            self.resume_available = True
+            self.add_log("Drawing stopped. Start Drawing will resume remaining strokes.")
+            self.update_ui_for_state("IDLE")
+            self.displayed_state = "IDLE"
+        else:
+            self.resume_available = False
+            self.add_log("Stop drawing request rejected or failed.")
+            self.update_ui_for_state(self.ros_node.current_state)
 
     def on_go_home_response(self, success, message):
         self.root.after(0, lambda: self._handle_go_home_response(success, message))

@@ -39,7 +39,7 @@ class MotionNode(Node):
         self.moveit2.max_velocity = 0.05
         self.moveit2.max_acceleration = 0.05
         self.fixed_orientation = [0.0, 1.0, 0.0, 0.0]
-        self.tcp_offset = 0.12
+        self.tcp_offset = 0.17 # length of the pen ( from end-effector to pentip when pen is interacting with paper, i.e. pointing downwards)
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
          # Create subscriber and publisher topic
@@ -52,7 +52,9 @@ class MotionNode(Node):
         # Run the drawing function/other functions
         self.is_drawing = False
         self.drawing_requested = False
+        self.stop_requested = False
         self.go_home_requested = False
+        self.portrait_in_progress = False
         self.portrait_mapping = None
         self.show_paper = True
         self.show_axes = False
@@ -62,6 +64,11 @@ class MotionNode(Node):
             Trigger,
             "/start_drawing",
             self.handle_start_drawing
+        )
+        self.stop_drawing_srv = self.create_service(
+            Trigger,
+            "/stop_drawing",
+            self.handle_stop_drawing
         )
         self.go_home_srv = self.create_service(
             Trigger,
@@ -81,6 +88,15 @@ class MotionNode(Node):
 
     def wait_for_motion(self):
         return self.moveit2.wait_until_executed()
+
+    def stop_was_requested(self):
+        return self.stop_requested
+
+    def remaining_path_from(self, msg: Path, start_index: int):
+        remaining = Path()
+        remaining.header = msg.header
+        remaining.poses = list(msg.poses[start_index:])
+        return remaining
 
     def transform_to_matrix(self, t, q):
         T = np.eye(4)
@@ -112,6 +128,11 @@ class MotionNode(Node):
     def point_to_plane_projection(self, point, plane_point, plane_normal):
         signed_distance = float(np.dot(point - plane_point, plane_normal))
         projected_point = point - signed_distance * plane_normal
+        return signed_distance, projected_point
+
+    def tool_distance_to_ground(self, tool_position):
+        signed_distance = float(tool_position[2])
+        projected_point = np.array([tool_position[0], tool_position[1], 0.0])
         return signed_distance, projected_point
 #-----------------------1. Load Calibration Data and Draw rectangle frame on paper--------------------------------
     # Extract calibration data from json file (rs2_ws/data/paper_calibration.json)
@@ -145,6 +166,18 @@ class MotionNode(Node):
             ]
     
         return P1, P2, P3, width, height, center, x_axis, y_axis, z_axis, quat
+
+    def save_tcp_offset_to_calibration(self):
+        workspace = os.getcwd()  # assumes running from ~/rs2_ws
+        json_path = os.path.join(workspace, "data", "paper_calibration.json")
+
+        with open(json_path, "r") as f:
+            data = json.load(f)
+
+        data["tcp_offset"] = float(self.tcp_offset)
+
+        with open(json_path, "w") as f:
+            json.dump(data, f, indent=4)
 #----------------------- 2. Draw Rectange for checking calibration accuracy--------------------------------------
     def generate_rectangle(self, P1, x_axis, y_axis, width, height, offset=0.01):
 
@@ -169,6 +202,9 @@ class MotionNode(Node):
         self.get_logger().info("Drawing rectangle...")
         drawn_path=[]
         for point in path:
+            if self.stop_was_requested():
+                self.get_logger().info("Rectangle drawing stopped")
+                return False
             
             if(z_axis[2]<0):
                 real_point = point - self.tcp_offset*z_axis
@@ -183,9 +219,12 @@ class MotionNode(Node):
                 quat_xyzw=quat,
                 cartesian=True
             )
-            self.wait_for_motion()
+            if not self.wait_for_motion() or self.stop_was_requested():
+                self.get_logger().info("Rectangle drawing stopped")
+                return False
             self.visualize_rectangle(drawn_path)
         self.get_logger().info("Rectangle done")
+        return True
 #--------------------------------------- 3. Visualization-----------------------------------------------
     def visualize_rectangle(self, path):
 
@@ -227,9 +266,12 @@ class MotionNode(Node):
             tcp_offset = data.get("tcp_offset")
             try:
                 self.tcp_offset = float(tcp_offset)
+                self.save_tcp_offset_to_calibration()
                 self.get_logger().info(f"Updated TCP offset from GUI: {self.tcp_offset:.4f} m")
             except (TypeError, ValueError):
                 self.get_logger().warn(f"Ignoring invalid TCP offset from GUI: {tcp_offset}")
+            except (FileNotFoundError, json.JSONDecodeError, OSError) as e:
+                self.get_logger().warn(f"Updated TCP offset in memory, but could not save calibration file: {e}")
             return
 
         if msg.data == "show_paper":
@@ -320,25 +362,26 @@ class MotionNode(Node):
     def update_distance_markers(self):
         try:
             P1, _, _, _, _, _, _, _, z_axis, _ = self.load_calibration()
-            tool_position, pen_tip_position = self.get_tool_and_pen_tip_positions()
+            tool_position, _ = self.get_tool_and_pen_tip_positions()
         except Exception:
             self.delete_distance_markers()
             return
 
         z_axis = z_axis / np.linalg.norm(z_axis)
 
-        tool_distance, tool_projected = self.point_to_plane_projection(tool_position, P1, z_axis)
-        tip_distance, tip_projected = self.point_to_plane_projection(pen_tip_position, P1, z_axis)
+        paper_distance, paper_projected = self.point_to_plane_projection(tool_position, P1, z_axis)
+        ground_distance, ground_projected = self.tool_distance_to_ground(tool_position)
 
-        text_offset = 0.01 * z_axis
-        tool_midpoint = 0.5 * (tool_position + tool_projected) + text_offset
-        tip_midpoint = 0.5 * (pen_tip_position + tip_projected) - text_offset
+        text_anchor = 0.5 * (tool_position + ground_projected) + np.array([-0.28, 0.0, 0.02])
+        text_gap = np.array([0.0, 0.0, 0.018])
+        paper_text_position = text_anchor + text_gap
+        ground_text_position = text_anchor
 
         markers = [
-            self.create_distance_line_marker(100, pen_tip_position, tip_projected, (0.0, 1.0, 0.0)),
-            self.create_distance_text_marker(101, tip_midpoint, f"Tip {abs(tip_distance):.3f}m", (0.0, 1.0, 0.0)),
-            self.create_distance_line_marker(102, tool_position, tool_projected, (0.0, 0.7, 1.0)),
-            self.create_distance_text_marker(103, tool_midpoint, f"Tool {abs(tool_distance):.3f}m", (0.0, 0.7, 1.0)),
+            self.create_distance_line_marker(100, tool_position, ground_projected, (1.0, 0.0, 0.0)),
+            self.create_distance_text_marker(101, ground_text_position, f"Ground:{abs(ground_distance):.3f}m", (1.0, 0.0, 0.0)),
+            self.create_distance_line_marker(102, tool_position, paper_projected, (0.0, 0.7, 1.0)),
+            self.create_distance_text_marker(103, paper_text_position, f"Paper:{abs(paper_distance):.3f}m", (0.0, 0.7, 1.0)),
         ]
 
         for marker in markers:
@@ -482,6 +525,8 @@ class MotionNode(Node):
 
         self.stroke_queue.clear()
         self.stroke_id = 0
+        self.stop_requested = False
+        self.portrait_in_progress = False
         self.get_logger().info("Cleared portrait strokes")
 
         response.success = True
@@ -505,12 +550,27 @@ class MotionNode(Node):
 
         self.get_logger().info(f"START DRAWING {len(self.stroke_queue)} strokes")
         self.portrait_mapping = self.compute_portrait_mapping(self.stroke_queue)
+        self.portrait_in_progress = True
 
         while len(self.stroke_queue) > 0:
+            if self.stop_was_requested():
+                self.get_logger().info(
+                    f"Portrait drawing stopped with {len(self.stroke_queue)} stroke(s) remaining"
+                )
+                return False
             msg = self.stroke_queue.pop(0)
-            self.draw_stroke(msg)
+            remaining = self.draw_stroke(msg)
+            if remaining is not None:
+                if len(remaining.poses) > 0:
+                    self.stroke_queue.insert(0, remaining)
+                self.get_logger().info(
+                    f"Portrait drawing stopped with {len(self.stroke_queue)} stroke(s) remaining"
+                )
+                return False
         self.portrait_mapping = None
+        self.portrait_in_progress = False
         self.get_logger().info("PORTRAIT DONE")
+        return True
 
     def compute_portrait_mapping(self, strokes):
         P1, P2, P3, width, height, center, x_axis, y_axis, z_axis, quat = self.load_calibration()
@@ -580,7 +640,9 @@ class MotionNode(Node):
         P1, P2, P3, width, height, center, x_axis, y_axis, z_axis, quat = self.load_calibration()
         lift_height = 0.02
         if len(msg.poses) == 0:
-            return
+            return None
+        if self.stop_was_requested():
+            return msg
         mapping = self.portrait_mapping or self.compute_portrait_mapping([msg])
         # -----------------------------
         # 1. MOVE ABOVE FIRST POINT
@@ -601,7 +663,8 @@ class MotionNode(Node):
             quat_xyzw=quat,
             cartesian=True
         )
-        self.wait_for_motion()
+        if not self.wait_for_motion() or self.stop_was_requested():
+            return msg
         self.get_logger().info("Reached above first point")
 
         # -----------------------------
@@ -617,13 +680,16 @@ class MotionNode(Node):
             quat_xyzw=quat,
             cartesian=True
         )
-        self.wait_for_motion()
+        if not self.wait_for_motion() or self.stop_was_requested():
+            return msg
 
         # -----------------------------
         # 3. DRAW CONTINUOUSLY
         # -----------------------------
         drawn_path = []
-        for pose in msg.poses:
+        for pose_index, pose in enumerate(msg.poses):
+            if self.stop_was_requested():
+                return self.remaining_path_from(msg, pose_index)
 
             pixel_x = pose.pose.position.x
             pixel_y = pose.pose.position.y
@@ -640,7 +706,8 @@ class MotionNode(Node):
                 quat_xyzw=quat,
                 cartesian=True
             )
-            self.wait_for_motion()
+            if not self.wait_for_motion() or self.stop_was_requested():
+                return self.remaining_path_from(msg, pose_index)
             drawn_path.append(point)
             self.visualize_stroke_path(drawn_path)
             self.stroke_id += 1
@@ -660,7 +727,9 @@ class MotionNode(Node):
             quat_xyzw=quat,
             cartesian=True
         )
-        self.wait_for_motion()
+        if not self.wait_for_motion() or self.stop_was_requested():
+            return Path()
+        return None
 #---------------------------------------------5. Fundamental Functions-------------------------------
     def go_home(self):
     #     self.moveit2.move_to_pose(
@@ -670,7 +739,10 @@ class MotionNode(Node):
     # )
         self.moveit2.move_to_configuration([1.57, -1.57, 1.57, -1.57, -1.57, 0.0])
         if not self.wait_for_motion():
+            if self.stop_was_requested():
+                return False
             raise RuntimeError("MoveIt planned the home motion, but execution did not complete")
+        return True
 
     def handle_go_home(self, request, response):
         if self.is_drawing or self.drawing_requested or self.go_home_requested:
@@ -683,6 +755,29 @@ class MotionNode(Node):
         self.go_home_requested = True
         response.success = True
         response.message = "Go home sequence started"
+        return response
+
+    def handle_stop_drawing(self, request, response):
+        if not self.is_drawing and not self.drawing_requested:
+            response.success = False
+            response.message = "Robot is not drawing"
+            self.get_logger().warn(response.message)
+            return response
+
+        self.stop_requested = True
+        self.drawing_requested = False
+        self.get_logger().info("Stop drawing service called")
+
+        try:
+            self.moveit2.cancel_execution()
+        except Exception as e:
+            self.get_logger().warn(f"Stop requested, but active motion could not be cancelled: {e}")
+
+        self.state_pub.publish(String(data="IDLE"))
+        self.status_pub.publish(String(data="Drawing stopped. Remaining strokes kept for resume."))
+
+        response.success = True
+        response.message = "Drawing stopped. Press Start Drawing to resume remaining strokes."
         return response
 
     def start_go_home_sequence(self):
@@ -720,6 +815,7 @@ class MotionNode(Node):
             return response
 
         self.get_logger().info("Start drawing service called")
+        self.stop_requested = False
         self.drawing_requested = True
 
         response.success = True
@@ -733,16 +829,23 @@ class MotionNode(Node):
             self.state_pub.publish(String(data="DRAWING"))
             self.status_pub.publish(String(data="Drawing sequence started"))
 
-            self.go_home()
+            if self.portrait_in_progress:
+                self.get_logger().info("Resuming portrait from remaining strokes")
+            else:
+                if not self.go_home() or self.stop_was_requested():
+                    return
+                time.sleep(1)
+
+                if not self.draw_rectangle() or self.stop_was_requested():
+                    return
+                time.sleep(1)
+
+            if not self.draw_portrait() or self.stop_was_requested():
+                return
             time.sleep(1)
 
-            self.draw_rectangle()
-            time.sleep(1)
-
-            self.draw_portrait()
-            time.sleep(1)
-
-            self.go_home()
+            if not self.go_home() or self.stop_was_requested():
+                return
             time.sleep(1)
 
             self.state_pub.publish(String(data="IDLE"))
@@ -755,6 +858,7 @@ class MotionNode(Node):
 
         finally:
             self.is_drawing = False
+
 def main():
 
     rclpy.init()
