@@ -8,6 +8,7 @@ from std_srvs.srv import Trigger
 from visualization_msgs.msg import Marker, MarkerArray
 import cv2
 from cv_bridge import CvBridge
+from rcl_interfaces.msg import SetParametersResult
 
 import portrait_vectorisation.portrait_processor as pp
 
@@ -25,6 +26,8 @@ class ImgProcessingNode(Node):
         self.declare_parameter('portrait_topic', '/portrait/preview')
         self.declare_parameter('strokes_topic', '/portrait/strokes')
         self.declare_parameter('markers_topic', '/portrait/markers')
+        self.declare_parameter('mask_type', 'none')
+        self.declare_parameter('masked_preview_topic', '/camera/masked_preview')
 
         self._stroke_delay  = self.get_parameter('stroke_publish_delay').value
         camera_topic        = self.get_parameter('camera_topic').value
@@ -32,16 +35,22 @@ class ImgProcessingNode(Node):
         portrait_topic      = self.get_parameter('portrait_topic').value
         strokes_topic       = self.get_parameter('strokes_topic').value
         markers_topic       = self.get_parameter('markers_topic').value
+        masked_preview_topic = self.get_parameter('masked_preview_topic').value
 
         # ------------------------------------------------------------------ #
         # State                                                                #
         # ------------------------------------------------------------------ #
-        self.latest_image: Image | None = None   # most recent frame from camera
-        self.snapshot:     Image | None = None   # frozen frame ready for processing
+        self.latest_raw_image: Image | None = None      # most recent frame from camera
+        self.latest_masked_image: Image | None = None   # most recent masked preview frame
+        self.snapshot:     Image | None = None          # frozen frame ready for processing
         self._snapshot_used = False              # True once snapshot has been processed
 
         self.bridge     = CvBridge()
         self.processor  = pp.PortraitProcessor()
+        self.allowed_masks = {"none"} | set(self.processor.masks.keys())
+        self.mask_type = self.get_parameter('mask_type').value
+
+        self.add_on_set_parameters_callback(self.param_callback)
 
         # ------------------------------------------------------------------ #
         # Subscribers                                                          #
@@ -49,7 +58,13 @@ class ImgProcessingNode(Node):
         self.subscription = self.create_subscription(
             Image,
             camera_topic,
-            self._image_callback,
+            self._raw_image_callback,
+            10,
+        )
+        self.masked_subscription = self.create_subscription(
+            Image,
+            masked_preview_topic,
+            self._masked_image_callback,
             10,
         )
 
@@ -60,6 +75,7 @@ class ImgProcessingNode(Node):
         self.portrait_pub = self.create_publisher(Image,       portrait_topic, 10)
         self.stroke_pub   = self.create_publisher(Path,        strokes_topic,  50)
         self.marker_pub   = self.create_publisher(MarkerArray, markers_topic,  10)
+        self.masked_pub   = self.create_publisher(Image,       masked_preview_topic, 10)
 
         # ------------------------------------------------------------------ #
         # Services                                                             #
@@ -82,15 +98,47 @@ class ImgProcessingNode(Node):
             f'  Portrait     : {portrait_topic}\n'
             f'  Strokes      : {strokes_topic}\n'
             f'  Markers      : {markers_topic}\n'
+            f'  Mask preview : {masked_preview_topic}\n'
+            f'  Masked source: {masked_preview_topic}\n'
             f'  Stroke delay : {self._stroke_delay}s'
         )
+
+    # ---------------------------------------------------------------------- #
+    # Parameters                                                             #
+    # ---------------------------------------------------------------------- #
+
+    def param_callback(self, params):
+        for p in params:
+            if p.name == "mask_type":
+                if p.value in self.allowed_masks:
+                    self.mask_type = p.value
+                    self.get_logger().info(f"Mask set to: {self.mask_type}")
+                    return SetParametersResult(successful=True)
+
+                self.get_logger().warn(
+                    f"Unknown mask '{p.value}'. Valid options: {sorted(self.allowed_masks)}"
+                )
+                return SetParametersResult(successful=False)
+        return SetParametersResult(successful=True)
 
     # ---------------------------------------------------------------------- #
     # Subscriber callback — only stores the latest frame                      #
     # ---------------------------------------------------------------------- #
 
-    def _image_callback(self, msg: Image) -> None:
-        self.latest_image = msg
+    def _raw_image_callback(self, msg: Image) -> None:
+        self.latest_raw_image = msg
+
+        try:
+            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            masked = self.processor.apply_mask(cv_image, self.mask_type)
+            masked_msg = self.bridge.cv2_to_imgmsg(masked, encoding='bgr8')
+            masked_msg.header = msg.header
+            self.masked_pub.publish(masked_msg)
+        except Exception as e:
+            self.get_logger().warn(f"Mask preview failed: {e}")
+
+    def _masked_image_callback(self, msg: Image) -> None:
+        self.latest_masked_image = msg
 
     # ---------------------------------------------------------------------- #
     # Service 1 — /capture_snapshot                                           #
@@ -101,17 +149,17 @@ class ImgProcessingNode(Node):
         Freeze the most recent camera frame into the snapshot buffer and
         publish it on the snapshot topic.
         """
-        if self.latest_image is None:
+        if self.latest_masked_image is None:
             msg = (
-                'No camera frame received yet. '
-                'Is the camera node running?'
+                'No masked preview received yet. '
+                'Is the mask preview running?'
             )
             self.get_logger().warn(msg)
             response.success = False
             response.message = msg
             return response
 
-        self.snapshot = self.latest_image
+        self.snapshot = self.latest_masked_image
         self._snapshot_used = False
 
         self.snapshot_pub.publish(self.snapshot)

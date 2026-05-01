@@ -1,3 +1,4 @@
+from glob import glob
 from setuptools import setup
 
 package_name = 'portrait_vectorisation'
@@ -9,6 +10,7 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/masks', glob('masks/*.png')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
