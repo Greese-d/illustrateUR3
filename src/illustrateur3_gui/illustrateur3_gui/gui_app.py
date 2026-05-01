@@ -5,11 +5,7 @@ import json
 
 import rclpy
 import cv2
-<<<<<<< HEAD
-=======
-import json
 import time
->>>>>>> main
 
 class GuiApp:
     def __init__(self, root, ros_node):
@@ -23,12 +19,8 @@ class GuiApp:
         self.camera_tk_image = None
         self.preview_tk_image = None
         self.live_drawing_tk_image = None
-<<<<<<< HEAD
-=======
-        self.freedrive_on = False
         self.last_gesture_time = 0.0
         self.gesture_cooldown_sec = 2.0
->>>>>>> main
         self.show_paper_var = tk.BooleanVar(value=True)
         self.show_axes_var = tk.BooleanVar(value=False)
         self.tcp_offset_var = tk.StringVar(value="0.12")
@@ -46,11 +38,8 @@ class GuiApp:
         self.ros_node.camera_callback_fn = self.on_camera_frame
         self.ros_node.preview_callback_fn = self.on_preview_frame
         self.ros_node.live_drawing_callback_fn = self.on_live_drawing_frame
-<<<<<<< HEAD
         self.ros_node.calibration_status_callback_fn = self.on_calibration_status
-=======
         self.ros_node.gesture_callback_fn = self.on_gesture_detected
->>>>>>> main
 
         self.update_ui_for_state("IDLE")
 
@@ -547,29 +536,21 @@ class GuiApp:
         self.status_text.config(text="Live-Drawing view opened.")
         self.add_log("Switched to Live-Drawing view.")
 
-<<<<<<< HEAD
     def open_settings_tab(self):
         self.preview_notebook.select(self.settings_tab)
         self.status_text.config(text="Settings view opened.")
         self.add_log("Switched to Settings view.")
 
-    def on_capture(self):
-=======
     def trigger_capture(self, source="button"):
->>>>>>> main
         self.status_text.config(text="Capture requested...")
         self.add_log(f"Capture Portrait requested from {source}.")
         self.ros_node.get_logger().info(f"Capture Portrait requested from {source}")
 
-<<<<<<< HEAD
         self.can_start_drawing = False
         self.resume_available = False
         self.capture_button.config(state="disabled")  # stop double-click spam
         self.pending_capture = True
         self.ros_node.clear_strokes(self.on_clear_strokes_response)
-=======
-        self.capture_button.config(state="disabled")
-        self.ros_node.create_portrait(self.on_capture_response)
 
     def on_capture(self):
         self.trigger_capture(source="button")
@@ -585,7 +566,6 @@ class GuiApp:
             self.status_text.config(text="Thumbs up detected. Capturing portrait...")
             self.add_log("Gesture detected: thumbs_up")
             self.trigger_capture(source="gesture: thumbs_up")
->>>>>>> main
 
     def on_start(self):
         self.status_text.config(text="Start drawing requested...")
