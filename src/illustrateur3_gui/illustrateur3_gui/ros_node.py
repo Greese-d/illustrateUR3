@@ -197,13 +197,16 @@ class GuiNode(Node):
             }
         )
 
-    def disassemble_pen(self, pen_index: int):
+    def detach_pen(self, pen_index: int):
         self.send_calibration_payload(
             {
-                "command": "disassemble_pen",
+                "command": "detach_pen",
                 "pen": int(pen_index),
             }
         )
+
+    def disassemble_pen(self, pen_index: int):
+        self.detach_pen(pen_index)
 
     def toggle_paper_display(self, enabled: bool):
         self.send_calibration_command("show_paper" if enabled else "hide_paper")
