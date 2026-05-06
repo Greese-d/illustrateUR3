@@ -63,7 +63,7 @@ class MotionNode(Node):
         self.show_axes = False
         # pencolor changing and pen docking parameters
         self.pen_calibration_data= "pen_storage_calibration.json"
-        self.pen_ready_to_attach_pos = 0.1 # this is the fixed distance from the bottom of the pen storage to ready position for rotate  and attach (lock the pen)
+        self.pen_ready_to_attach_pos = 0.20 # this is the fixed distance from the bottom of the pen storage to ready position for rotate  and attach (lock the pen)
         # Timer and flags for stroke reception
         self.inactivity_timer = None  # Timer to detect end of stroke messages
         self.strokes_reported = False  # Flag to report total strokes only once per batch
@@ -938,6 +938,8 @@ class MotionNode(Node):
     def detach_pen(self, pen_index):
         # Get Ready Pose from JSON
         ready_position, ready_quat = self.get_pen_ready_pose(pen_index)
+        # Go home first to ensure a consistent starting pose for MoveIt planning to the pen ready pose
+        self.go_home()
         # Move to ready pose above the pen + extra distance to ensure pentip not gonna collide with top of pen storage 
         ready_to_detach_position = ready_position + np.array([0.0, 0.0, 0.05])  # Add 5 cm in z to be safely above
         self.moveit2.move_to_pose(
@@ -959,11 +961,15 @@ class MotionNode(Node):
         self.move_vertical(0.15)
         # Twist back to original orientation after lifting
         self.rotate_end_effector(-90.0, degrees=True)
+        # After detaching, the pen should be in the storage. Move back to home.
+        self.go_home()
 
 
     def attach_pen(self, pen_index):
         #Get Ready Pose from JSON
         ready_position, ready_quat = self.get_pen_ready_pose(pen_index)
+        # Go home first to ensure a consistent starting pose for MoveIt planning to the pen ready pose
+        self.go_home()
         #Move to ready pose above the pen
         self.moveit2.move_to_pose(
             position=ready_position.tolist(),
@@ -983,7 +989,8 @@ class MotionNode(Node):
         self.move_vertical(0.10 + abs(dist_tool_to_pen))
         # Twist back to original orientation after lifting
         self.rotate_end_effector(-90.0, degrees=True)
-
+        # After attaching, the pen should be in the robot's end effector. Move back to home.
+        self.go_home()
 #---------------------------------------------7. Cartesian Utility Motion-------------------------------
     def move_vertical(self, dist):
         transform = self.tf_buffer.lookup_transform(
