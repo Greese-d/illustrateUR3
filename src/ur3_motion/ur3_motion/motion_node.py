@@ -63,7 +63,7 @@ class MotionNode(Node):
         self.show_axes = False
         # pencolor changing and pen docking parameters
         self.pen_calibration_data= "pen_storage_calibration.json"
-        self.pen_ready_to_attach_pos = 0.20 # this is the fixed distance from the bottom of the pen storage to ready position for rotate  and attach (lock the pen)
+        self.pen_ready_to_attach_pos = 0.1916 # this is the fixed distance from the bottom of the pen storage to ready position for rotate  and attach (lock the pen)
         # Timer and flags for stroke reception
         self.inactivity_timer = None  # Timer to detect end of stroke messages
         self.strokes_reported = False  # Flag to report total strokes only once per batch
