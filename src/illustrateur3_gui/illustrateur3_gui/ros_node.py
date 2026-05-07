@@ -1,6 +1,8 @@
 import json
 import numpy as np
 import cv2
+from rcl_interfaces.srv import SetParameters
+from rcl_interfaces.msg import Parameter, ParameterValue, ParameterType
 
 from std_msgs.msg import String
 from sensor_msgs.msg import Image
@@ -24,6 +26,11 @@ class GuiNode(Node):
 
         self.calibration_pub = self.create_publisher(
             String, "/calibration/command", 10
+        )
+
+        self.set_image_processing_params_client = self.create_client(
+            SetParameters,
+            "/image_processing_node/set_parameters"
         )
 
         self.create_portrait_client = self.create_client(
@@ -101,6 +108,14 @@ class GuiNode(Node):
                 self.camera_callback_fn(frame_bgr)
         except Exception as e:
             self.get_logger().warn(f"Failed to render camera image: {e}")
+
+    def set_mask_type(self, mask_type: str):
+        self.send_calibration_payload(
+            {
+                "command": "set_mask_type",
+                "mask_type": mask_type,
+            }
+        )
 
     def preview_image_callback(self, msg):
         try:
@@ -204,6 +219,44 @@ class GuiNode(Node):
                 "pen": int(pen_index),
             }
         )
+
+    def set_mask_type(self, mask_type: str, gui_callback=None):
+        if not self.set_image_processing_params_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().error("/image_processing_node/set_parameters service not available")
+            if gui_callback:
+                gui_callback(False, "/image_processing_node/set_parameters service not available")
+            return
+
+        request = SetParameters.Request()
+        param = Parameter()
+        param.name = "mask_type"
+        param.value = ParameterValue(
+            type=ParameterType.PARAMETER_STRING,
+            string_value=mask_type,
+        )
+        request.parameters = [param]
+
+        future = self.set_image_processing_params_client.call_async(request)
+
+        def _done(fut):
+            try:
+                response = fut.result()
+                success = bool(response.results and response.results[0].successful)
+                message = (
+                    response.results[0].reason
+                    if response.results and response.results[0].reason
+                    else f"Mask set to {mask_type}"
+                )
+                self.get_logger().info(f"Set mask response: success={success}, message='{message}'")
+                if gui_callback:
+                    gui_callback(success, message)
+            except Exception as e:
+                error_msg = f"Set mask failed: {e}"
+                self.get_logger().error(error_msg)
+                if gui_callback:
+                    gui_callback(False, error_msg)
+
+        future.add_done_callback(_done)
 
     def toggle_paper_display(self, enabled: bool):
         self.send_calibration_command("show_paper" if enabled else "hide_paper")

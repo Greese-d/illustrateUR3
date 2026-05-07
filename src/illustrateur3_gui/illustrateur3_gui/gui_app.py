@@ -514,6 +514,16 @@ class GuiApp:
         self.add_log(f"Paper XYZ axes display toggled {state_text}.")
         self.ros_node.get_logger().info(f"Paper XYZ axes display toggled {state_text}")
 
+    def on_mask_response(self, success, message):
+        self.root.after(0, lambda: self._handle_mask_response(success, message))
+
+    def _handle_mask_response(self, success, message):
+        self.add_log(f"Set mask response: success={success}, message='{message}'")
+        if success:
+            self.status_text.config(text=message if message else "Mask updated.")
+        else:
+            self.status_text.config(text=message if message else "Failed to update mask.")
+
     def on_state_update(self, new_state):
         previous_state = self.displayed_state
         if new_state == "IDLE" and previous_state == "DRAWING":
@@ -628,16 +638,63 @@ class GuiApp:
         self.trigger_capture(source="button")
 
     def on_gesture_detected(self, gesture_name):
+        gesture_name = gesture_name.strip().upper()
         now = time.time()
 
         if now - self.last_gesture_time < self.gesture_cooldown_sec:
             return
 
-        if gesture_name == "thumbs_up":
+        mask_gesture_map = {
+            "POINT": "moustache",   # mask 1
+            "PEACE": "hat",         # mask 2
+            "THREE": "glasses",     # mask 3
+            "FOUR": "nose",         # mask 4
+        }
+
+        if gesture_name in mask_gesture_map:
             self.last_gesture_time = now
+
+            mask_type = mask_gesture_map[gesture_name]
+            self.status_text.config(
+                text=f"{gesture_name} detected. Applying {mask_type} mask..."
+            )
+            self.add_log(f"Gesture detected: {gesture_name} -> mask: {mask_type}")
+
+            self.ros_node.set_mask_type(mask_type, self.on_mask_response)
+            return
+
+        if gesture_name == "THUMBS_UP":
+            self.last_gesture_time = now
+
             self.status_text.config(text="Thumbs up detected. Capturing portrait...")
-            self.add_log("Gesture detected: thumbs_up")
-            self.trigger_capture(source="gesture: thumbs_up")
+            self.add_log("Gesture detected: THUMBS_UP -> capture portrait")
+
+            self.trigger_capture(source="gesture: THUMBS_UP")
+            return
+
+        if gesture_name == "THUMBS_DOWN":
+            self.last_gesture_time = now
+
+            self.status_text.config(text="Thumbs down detected. Stopping drawing...")
+            self.add_log("Gesture detected: THUMBS_DOWN -> stop drawing")
+
+            if str(self.stop_button.cget("state")) != "disabled":
+                self.on_stop()
+            else:
+                self.add_log("Stop ignored because Stop Drawing is currently disabled.")
+            return
+
+        if gesture_name == "GREEN GIANT":
+            self.last_gesture_time = now
+
+            self.status_text.config(text="Green Giant detected. Starting drawing...")
+            self.add_log("Gesture detected: GREEN GIANT -> start drawing")
+
+            if str(self.start_button.cget("state")) != "disabled":
+                self.on_start()
+            else:
+                self.add_log("Start ignored because Start Drawing is currently disabled.")
+            return
 
     def on_start(self):
         self.status_text.config(text="Start drawing requested...")

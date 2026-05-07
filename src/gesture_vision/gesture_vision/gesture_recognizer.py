@@ -171,6 +171,9 @@ class GestureRecognizer(Node):
 
         if not idx and not mid and not ring and pinky and thumb:
             return "CALL ME"
+        
+        if idx and mid and ring and not pinky:
+            return "THREE"
 
         return "UNKNOWN"
 
