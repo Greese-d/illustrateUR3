@@ -21,25 +21,28 @@ _RawStroke = List[_Point]
 class PortraitProcessor:
     def __init__(
         self,
-        line_thickness: int = 6,
+        line_thickness: int = 4,
         sort_strokes: bool = True,
+        min_stroke_length: float = 20.0,
     ):
         """
         Parameters
         ----------
-        chain_threshold : float
-            Maximum pixel distance between the endpoint of one contour and the
-            startpoint of another for them to be merged into a single stroke.
+        line_thickness : int
+            Maximum pixel distance between stroke endpoints for chaining.
             Smaller values -> fewer merges, more pen lifts.
             Larger values  -> more merges, but may incorrectly join unrelated strokes.
         sort_strokes : bool
             Whether to reorder strokes using nearest-neighbour TSP so the arm
             travels the shortest path between strokes.
+        min_stroke_length : float
+            Minimum contour length (in pixels) required to keep a stroke.
         """
         mp_selfie = mp.solutions.selfie_segmentation
         self.segmenter = mp_selfie.SelfieSegmentation(model_selection=1)
         self.line_thickness = line_thickness
         self.sort_strokes = sort_strokes
+        self.min_stroke_length = min_stroke_length
 
         mp_face = mp.solutions.face_mesh
         self.face_mesh = mp_face.FaceMesh(static_image_mode=False)
@@ -178,17 +181,18 @@ class PortraitProcessor:
 
         elif mask_type == "hat":
             width = int(eye_dist * 2.7)
-            height = int(width * 0.70)
+            hat_aspect = mask_img.shape[0] / mask_img.shape[1]
+            height = int(width * hat_aspect)
             center = (left_eye + right_eye) / 2
             anchor_x = width / 2
-            anchor_y = height * 0.85
+            anchor_y = height * 0.90
             up = np.array([dy, -dx], dtype=np.float32)
             up_norm = np.linalg.norm(up)
             if up_norm > 1e-6:
                 up /= up_norm
             else:
                 up = np.array([0.0, -1.0], dtype=np.float32)
-            anchor_target = center + (up * (height * 0.25))
+            anchor_target = center - (up * (eye_dist * 0.40))
             anchor_target_x = float(anchor_target[0])
             anchor_target_y = float(anchor_target[1])
 
@@ -295,7 +299,7 @@ class PortraitProcessor:
         )
         result = []
         for c in contours:
-            if cv2.arcLength(c, False) < 20:
+            if cv2.arcLength(c, False) < self.min_stroke_length:
                 continue
             smooth = cv2.approxPolyDP(c, 2.0, False)
             result.append(smooth)
@@ -387,7 +391,7 @@ class PortraitProcessor:
             merged = True
             while merged:
                 merged = False
-                best_dist = self.line_thickness  # max distance to consider for chaining
+                best_dist = self.line_thickness * 2  # max distance to consider for chaining
                 best_idx = -1
                 best_mode = None   # ('append'|'prepend', flip: bool)
 
@@ -494,7 +498,7 @@ class PortraitProcessor:
         canvas = np.ones((*edges.shape, 3), dtype=np.uint8) * 255
         for idx, stroke in enumerate(strokes):
             pts = np.array(stroke, dtype=np.int32).reshape((-1, 1, 2))
-            cv2.polylines(canvas, [pts], isClosed=False, color=self._stroke_colour(idx), thickness=6)
+            cv2.polylines(canvas, [pts], isClosed=False, color=self._stroke_colour(idx), thickness=self.line_thickness)
         return canvas
 
     def _stroke_colour(self, stroke_idx: int) -> Tuple[int, int, int]:
