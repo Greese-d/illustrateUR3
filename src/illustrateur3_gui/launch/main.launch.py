@@ -28,6 +28,12 @@ def generate_launch_description():
         description='Set to true to use fake hardware in the UR driver.'
     )
 
+    headless_mode_arg = DeclareLaunchArgument(
+        'headless_mode',
+        default_value='true',
+        description='Allow the UR driver to resend the External Control program after direct URScript.'
+    )
+
     # -----------------------------
     # UR Robot Driver launch
     # -----------------------------
@@ -43,6 +49,7 @@ def generate_launch_description():
             'ur_type': 'ur3',
             'robot_ip': '192.168.0.195',
             'use_fake_hardware': LaunchConfiguration('use_fake_hardware'),
+            'headless_mode': LaunchConfiguration('headless_mode'),
             'launch_rviz': 'false'
         }.items()
     )
@@ -144,6 +151,7 @@ def generate_launch_description():
     return LaunchDescription([
         launch_camera_arg,
         use_fake_hardware_arg,
+        headless_mode_arg,
         ur_driver,
         moveit,
         gui_node,
