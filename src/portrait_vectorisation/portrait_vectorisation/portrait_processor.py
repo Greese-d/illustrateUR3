@@ -5,6 +5,8 @@ import os
 from typing import List, Tuple
 from ament_index_python.packages import get_package_share_directory
 
+import portrait_vectorisation.sig_gen as sig_gen
+
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Path
 
@@ -24,6 +26,7 @@ class PortraitProcessor:
         line_thickness: int = 4,
         sort_strokes: bool = True,
         min_stroke_length: float = 20.0,
+        signature_scale: float = 0.30,
     ):
         """
         Parameters
@@ -37,12 +40,15 @@ class PortraitProcessor:
             travels the shortest path between strokes.
         min_stroke_length : float
             Minimum contour length (in pixels) required to keep a stroke.
+        signature_scale : float
+            Scale factor for the signature strokes relative to the image size.
         """
         mp_selfie = mp.solutions.selfie_segmentation
         self.segmenter = mp_selfie.SelfieSegmentation(model_selection=1)
         self.line_thickness = line_thickness
         self.sort_strokes = sort_strokes
         self.min_stroke_length = min_stroke_length
+        self.signature_scale = signature_scale
 
         mp_face = mp.solutions.face_mesh
         self.face_mesh = mp_face.FaceMesh(static_image_mode=False)
@@ -57,6 +63,9 @@ class PortraitProcessor:
             "glasses": cv2.imread(os.path.join(base, "masks", "glasses.png"), cv2.IMREAD_UNCHANGED),
             "nose": cv2.imread(os.path.join(base, "masks", "nose.png"), cv2.IMREAD_UNCHANGED),
         }
+        self.signature_strokes = self._load_signature_svg(
+            os.path.join(base, "signature", "signature.svg")
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -100,6 +109,8 @@ class PortraitProcessor:
         raw_contours = self._extract_contours(edges)
         raw_strokes = self._contours_to_raw(raw_contours)
         raw_strokes = self._chain_strokes(raw_strokes)
+
+        raw_strokes = self._add_signature_strokes(raw_strokes, img.shape)
 
         if self.sort_strokes:
             raw_strokes = self._sort_strokes(raw_strokes)
@@ -278,15 +289,97 @@ class PortraitProcessor:
         oy1 = oy0 + (y1 - y0)
 
         overlay_crop = overlay[oy0:oy1, ox0:ox1]
-        alpha = overlay_crop[:, :, 3] / 255.0
+        if overlay_crop.shape[2] == 4:
+            alpha = overlay_crop[:, :, 3] / 255.0
+            overlay_rgb = overlay_crop[:, :, :3]
+        else:
+            alpha = np.ones((overlay_crop.shape[0], overlay_crop.shape[1]), dtype=np.float32)
+            overlay_rgb = overlay_crop
 
         for c in range(3):
             bg[y0:y1, x0:x1, c] = (
-                alpha * overlay_crop[:, :, c] +
+                alpha * overlay_rgb[:, :, c] +
                 (1 - alpha) * bg[y0:y1, x0:x1, c]
             )
 
         return bg
+
+    def _load_signature_svg(self, path: str) -> List[_RawStroke] | None:
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                svg_text = handle.read()
+            try:
+                svg_text = sig_gen.extract_svg_text(svg_text)
+            except ValueError:
+                pass
+            strokes = sig_gen.svg_to_strokes(svg_text)
+            if not isinstance(strokes, list):
+                return None
+            return [
+                [(float(x), float(y)) for x, y in stroke]
+                for stroke in strokes
+                if isinstance(stroke, list) and len(stroke) >= 2
+            ]
+        except Exception:
+            return None
+
+    def _add_signature_strokes(
+        self,
+        strokes: List[_RawStroke],
+        image_shape: Tuple[int, int, int],
+    ) -> List[_RawStroke]:
+        if not self.signature_strokes:
+            return strokes
+
+        img_h, img_w = image_shape[:2]
+
+        sig_points = [p for stroke in self.signature_strokes for p in stroke]
+        xs = [p[0] for p in sig_points]
+        ys = [p[1] for p in sig_points]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+
+        sig_w = max_x - min_x
+        sig_h = max_y - min_y
+        if sig_w <= 0 or sig_h <= 0:
+            return strokes
+
+        max_w = int(img_w * self.signature_scale)
+        max_h = int(img_h * self.signature_scale)
+        scale = min(1.0, max_w / sig_w, max_h / sig_h)
+
+        pad = max(5, int(min(img_w, img_h) * 0.01))
+        scaled_w = sig_w * scale
+        scaled_h = sig_h * scale
+        candidates = [
+            (pad, pad),
+            (img_w - scaled_w - pad, pad),
+            (pad, img_h - scaled_h - pad),
+            (img_w - scaled_w - pad, img_h - scaled_h - pad),
+        ]
+
+        points = [p for stroke in strokes for p in stroke]
+
+        def count_hits(x: float, y: float) -> int:
+            x1 = x + scaled_w
+            y1 = y + scaled_h
+            return sum(1 for px, py in points if x <= px <= x1 and y <= py <= y1)
+
+        best_x, best_y = min(candidates, key=lambda pos: count_hits(pos[0], pos[1]))
+
+        placed: List[_RawStroke] = []
+        for stroke in self.signature_strokes:
+            placed.append([
+                (
+                    int(round((x - min_x) * scale + best_x)),
+                    int(round((y - min_y) * scale + best_y)),
+                )
+                for x, y in stroke
+            ])
+
+        return strokes + placed
 
     # ------------------------------------------------------------------
     # Stage 1 -- extract and simplify contours

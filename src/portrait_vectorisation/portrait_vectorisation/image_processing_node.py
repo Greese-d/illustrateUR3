@@ -29,6 +29,7 @@ class ImgProcessingNode(Node):
         self.declare_parameter('mask_type', 'none')
         self.declare_parameter('masked_preview_topic', '/camera/masked_preview')
         self.declare_parameter('min_stroke_length', 20.0)
+        self.declare_parameter('signature_scale', 0.30)
 
         self._stroke_delay  = self.get_parameter('stroke_publish_delay').value
         camera_topic        = self.get_parameter('camera_topic').value
@@ -48,7 +49,7 @@ class ImgProcessingNode(Node):
         self._snapshot_used = False              # True once snapshot has been processed
 
         self.bridge     = CvBridge()
-        self.processor  = pp.PortraitProcessor(min_stroke_length=min_stroke_length)
+        self.processor  = pp.PortraitProcessor(min_stroke_length=min_stroke_length, signature_scale=self.get_parameter('signature_scale').value)
         self.allowed_masks = {"none"} | set(self.processor.masks.keys())
         self.mask_type = self.get_parameter('mask_type').value
 
