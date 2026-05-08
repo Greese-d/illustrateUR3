@@ -109,14 +109,6 @@ class GuiNode(Node):
         except Exception as e:
             self.get_logger().warn(f"Failed to render camera image: {e}")
 
-    def set_mask_type(self, mask_type: str):
-        self.send_calibration_payload(
-            {
-                "command": "set_mask_type",
-                "mask_type": mask_type,
-            }
-        )
-
     def preview_image_callback(self, msg):
         try:
             frame_bgr = self.rosimg_to_bgr(msg)
@@ -212,10 +204,10 @@ class GuiNode(Node):
             }
         )
 
-    def disassemble_pen(self, pen_index: int):
+    def detach_pen(self, pen_index: int):
         self.send_calibration_payload(
             {
-                "command": "disassemble_pen",
+                "command": "detach_pen",
                 "pen": int(pen_index),
             }
         )
@@ -257,6 +249,9 @@ class GuiNode(Node):
                     gui_callback(False, error_msg)
 
         future.add_done_callback(_done)
+
+    def disassemble_pen(self, pen_index: int):
+        self.detach_pen(pen_index)
 
     def toggle_paper_display(self, enabled: bool):
         self.send_calibration_command("show_paper" if enabled else "hide_paper")

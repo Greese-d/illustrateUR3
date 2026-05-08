@@ -23,8 +23,13 @@ class FakeRosNode:
         self.set_point_2 = MagicMock()
         self.set_point_3 = MagicMock()
         self.send_calibration_command = MagicMock()
+        self.toggle_paper_display = MagicMock()
+        self.toggle_axes_display = MagicMock()
+        self.attach_pen = MagicMock()
+        self.detach_pen = MagicMock()
 
         self._logger = FakeLogger()
+        self.current_state = "IDLE"
 
     def get_logger(self):
         return self._logger
@@ -85,7 +90,41 @@ class TestGuiApp(unittest.TestCase):
         self.assertEqual(str(self.app.stop_button["state"]), "disabled")
 
     # --------------------------------------------------
-    # Test 3: Image display (preview + live drawing)
+    # Test 3: Settings pen changing controls
+    # --------------------------------------------------
+    def test_change_color_controls_toggle_and_trigger_pen_commands(self):
+        self.assertFalse(self.app.change_color_frame.winfo_ismapped())
+
+        self.app.change_color_var.set(True)
+        self.app.on_toggle_change_color()
+        self.root.update()
+        self.assertTrue(self.app.change_color_frame.winfo_ismapped())
+        self.assertEqual(str(self.app.attach_pen_buttons[1]["state"]), "normal")
+        self.assertEqual(str(self.app.detach_pen_buttons[1]["state"]), "disabled")
+
+        self.app.on_attach_pen(1)
+        self.ros_node.attach_pen.assert_called_once_with(1)
+        self.assertEqual(str(self.app.attach_pen_buttons[1]["state"]), "disabled")
+        self.assertEqual(str(self.app.attach_pen_buttons[2]["state"]), "disabled")
+        self.assertEqual(str(self.app.attach_pen_buttons[3]["state"]), "disabled")
+        self.assertEqual(str(self.app.detach_pen_buttons[1]["state"]), "normal")
+        self.assertEqual(str(self.app.detach_pen_buttons[2]["state"]), "disabled")
+        self.assertEqual(str(self.app.detach_pen_buttons[3]["state"]), "disabled")
+
+        self.app.on_detach_pen(1)
+        self.ros_node.detach_pen.assert_called_once_with(1)
+        self.assertEqual(str(self.app.attach_pen_buttons[1]["state"]), "normal")
+        self.assertEqual(str(self.app.attach_pen_buttons[2]["state"]), "normal")
+        self.assertEqual(str(self.app.attach_pen_buttons[3]["state"]), "normal")
+        self.assertEqual(str(self.app.detach_pen_buttons[1]["state"]), "disabled")
+
+        self.app.change_color_var.set(False)
+        self.app.on_toggle_change_color()
+        self.root.update()
+        self.assertFalse(self.app.change_color_frame.winfo_ismapped())
+
+    # --------------------------------------------------
+    # Test 4: Image display (preview + live drawing)
     # --------------------------------------------------
     def test_preview_and_live_drawing_frames_are_rendered(self):
         frame = np.zeros((480, 640, 3), dtype=np.uint8)  # fake image frame

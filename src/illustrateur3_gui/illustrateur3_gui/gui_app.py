@@ -23,6 +23,7 @@ class GuiApp:
         self.gesture_cooldown_sec = 2.0
         self.show_paper_var = tk.BooleanVar(value=True)
         self.show_axes_var = tk.BooleanVar(value=False)
+        self.change_color_var = tk.BooleanVar(value=False)
         self.tcp_offset_var = tk.StringVar(value="0.12")
         self.move_vertical_var = tk.StringVar(value="0.02")
         self.rotate_end_effector_var = tk.StringVar(value="90")
@@ -32,6 +33,7 @@ class GuiApp:
         self.can_start_drawing = False
         self.resume_available = False
         self.displayed_state = "IDLE"
+        self.attached_pen_index = None
 
         self.setup_styles()
         self.build_layout()
@@ -395,6 +397,42 @@ class GuiApp:
         )
         self.rotate_end_effector_send_button.grid(row=3, column=2, padx=(0, 6), pady=6, sticky="w")
 
+        self.change_color_check = ttk.Checkbutton(
+            self.settings_tab,
+            text="Change Color",
+            variable=self.change_color_var,
+            command=self.on_toggle_change_color
+        )
+        self.change_color_check.grid(row=4, column=0, columnspan=3, padx=6, pady=(14, 6), sticky="w")
+
+        self.change_color_frame = ttk.Frame(self.settings_tab)
+        self.change_color_frame.columnconfigure(0, weight=1)
+        self.change_color_frame.columnconfigure(1, weight=1)
+
+        self.pen_change_buttons = []
+        self.attach_pen_buttons = {}
+        self.detach_pen_buttons = {}
+        for row, pen_index in enumerate((1, 2, 3)):
+            attach_button = ttk.Button(
+                self.change_color_frame,
+                text=f"Attach Pen {pen_index}",
+                style="Big.TButton",
+                command=lambda index=pen_index: self.on_attach_pen(index)
+            )
+            attach_button.grid(row=row, column=0, padx=(6, 4), pady=6, sticky="ew")
+
+            detach_button = ttk.Button(
+                self.change_color_frame,
+                text=f"Detach Pen {pen_index}",
+                style="Big.TButton",
+                command=lambda index=pen_index: self.on_detach_pen(index)
+            )
+            detach_button.grid(row=row, column=1, padx=(4, 6), pady=6, sticky="ew")
+
+            self.pen_change_buttons.extend((attach_button, detach_button))
+            self.attach_pen_buttons[pen_index] = attach_button
+            self.detach_pen_buttons[pen_index] = detach_button
+
         self.preview_notebook.add(self.settings_tab, text="Settings")
 
         # =========================
@@ -546,6 +584,7 @@ class GuiApp:
             self.tcp_offset_send_button.config(state="normal")
             self.move_vertical_send_button.config(state="normal")
             self.rotate_end_effector_send_button.config(state="normal")
+            self.update_pen_change_button_states(True)
         elif state == "PREVIEW_READY":
             self.capture_button.config(state="normal")
             self.start_button.config(state="normal")
@@ -554,6 +593,7 @@ class GuiApp:
             self.tcp_offset_send_button.config(state="normal")
             self.move_vertical_send_button.config(state="normal")
             self.rotate_end_effector_send_button.config(state="normal")
+            self.update_pen_change_button_states(True)
         elif state == "DRAWING":
             self.capture_button.config(state="disabled")
             self.start_button.config(state="disabled")
@@ -562,6 +602,7 @@ class GuiApp:
             self.tcp_offset_send_button.config(state="disabled")
             self.move_vertical_send_button.config(state="disabled")
             self.rotate_end_effector_send_button.config(state="disabled")
+            self.update_pen_change_button_states(False)
         elif state == "GOING_HOME":
             self.capture_button.config(state="disabled")
             self.start_button.config(state="disabled")
@@ -570,6 +611,7 @@ class GuiApp:
             self.tcp_offset_send_button.config(state="disabled")
             self.move_vertical_send_button.config(state="disabled")
             self.rotate_end_effector_send_button.config(state="disabled")
+            self.update_pen_change_button_states(False)
         elif state == "PROCESSING":
             self.capture_button.config(state="disabled")
             self.start_button.config(state="disabled")
@@ -578,6 +620,7 @@ class GuiApp:
             self.tcp_offset_send_button.config(state="disabled")
             self.move_vertical_send_button.config(state="disabled")
             self.rotate_end_effector_send_button.config(state="disabled")
+            self.update_pen_change_button_states(False)
         elif state == "ESTOP":
             self.capture_button.config(state="disabled")
             self.start_button.config(state="disabled")
@@ -586,6 +629,7 @@ class GuiApp:
             self.tcp_offset_send_button.config(state="disabled")
             self.move_vertical_send_button.config(state="disabled")
             self.rotate_end_effector_send_button.config(state="disabled")
+            self.update_pen_change_button_states(False)
         elif state == "ERROR":
             self.capture_button.config(state="normal")
             self.start_button.config(state="disabled")
@@ -594,6 +638,7 @@ class GuiApp:
             self.tcp_offset_send_button.config(state="normal")
             self.move_vertical_send_button.config(state="normal")
             self.rotate_end_effector_send_button.config(state="normal")
+            self.update_pen_change_button_states(True)
         else:
             self.capture_button.config(state="disabled")
             self.start_button.config(state="disabled")
@@ -602,6 +647,27 @@ class GuiApp:
             self.tcp_offset_send_button.config(state="disabled")
             self.move_vertical_send_button.config(state="disabled")
             self.rotate_end_effector_send_button.config(state="disabled")
+            self.update_pen_change_button_states(False)
+
+    def set_pen_change_buttons_state(self, state):
+        for button in self.pen_change_buttons:
+            button.config(state=state)
+
+    def update_pen_change_button_states(self, controls_enabled=True):
+        if not controls_enabled:
+            self.set_pen_change_buttons_state("disabled")
+            return
+
+        if self.attached_pen_index is None:
+            for pen_index in (1, 2, 3):
+                self.attach_pen_buttons[pen_index].config(state="normal")
+                self.detach_pen_buttons[pen_index].config(state="disabled")
+            return
+
+        for pen_index in (1, 2, 3):
+            self.attach_pen_buttons[pen_index].config(state="disabled")
+            detach_state = "normal" if pen_index == self.attached_pen_index else "disabled"
+            self.detach_pen_buttons[pen_index].config(state=detach_state)
 
     def open_calibration_tab(self):
         self.preview_notebook.select(self.calibration_tab)
@@ -809,9 +875,39 @@ class GuiApp:
 
     def on_pen_selected(self, pen_index):
         self.ros_node.save_pen_ready_pose(pen_index)
-        self.status_text.config(text=f"Saving Pen {pen_index} ready pose...")
-        self.add_log(f"Pen {pen_index} ready pose save requested.")
-        self.ros_node.get_logger().info(f"Pen {pen_index} ready pose save requested")
+        self.status_text.config(
+            text=f"Previewing Pen {pen_index} ready pose. Press Confirm Point to save."
+        )
+        self.add_log(f"Pen {pen_index} ready pose preview requested.")
+        self.ros_node.get_logger().info(f"Pen {pen_index} ready pose preview requested")
+
+    def on_toggle_change_color(self):
+        if self.change_color_var.get():
+            self.change_color_frame.grid(row=5, column=0, columnspan=3, padx=0, pady=(0, 6), sticky="ew")
+            self.update_pen_change_button_states(self.displayed_state in ("IDLE", "PREVIEW_READY", "ERROR"))
+            self.status_text.config(text="Pen changing controls shown.")
+            self.add_log("Change Color controls shown.")
+        else:
+            self.change_color_frame.grid_remove()
+            self.status_text.config(text="Pen changing controls hidden.")
+            self.add_log("Change Color controls hidden.")
+
+    def on_attach_pen(self, pen_index):
+        self.ros_node.attach_pen(pen_index)
+        self.attached_pen_index = pen_index
+        self.update_pen_change_button_states(True)
+        self.status_text.config(text=f"Attaching Pen {pen_index}...")
+        self.add_log(f"Attach Pen {pen_index} requested.")
+        self.ros_node.get_logger().info(f"Attach Pen {pen_index} requested")
+
+    def on_detach_pen(self, pen_index):
+        self.ros_node.detach_pen(pen_index)
+        if self.attached_pen_index == pen_index:
+            self.attached_pen_index = None
+        self.update_pen_change_button_states(True)
+        self.status_text.config(text=f"Detaching Pen {pen_index}...")
+        self.add_log(f"Detach Pen {pen_index} requested.")
+        self.ros_node.get_logger().info(f"Detach Pen {pen_index} requested")
 
     def on_send_tcp_offset(self):
         raw_value = self.tcp_offset_var.get().strip()
@@ -874,6 +970,11 @@ class GuiApp:
 
         if data.get("command") == "tcp_offset_status":
             message = data.get("message", f"TCP offset is {float(data['tcp_offset']):.4f} m")
+            self.status_text.config(text=message)
+            self.add_log(message)
+
+        if data.get("command") in ("pen_ready_pose_preview", "pen_ready_pose_saved"):
+            message = data.get("message", "Pen ready pose updated.")
             self.status_text.config(text=message)
             self.add_log(message)
 

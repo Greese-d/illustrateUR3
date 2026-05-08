@@ -41,12 +41,19 @@ class MotionNode(Node):
         self.moveit2.max_acceleration = 0.05
         self.fixed_orientation = [0.0, 1.0, 0.0, 0.0]
         self.tcp_offset = 0.17 # length of the pen ( from end-effector to pentip when pen is interacting with paper, i.e. pointing downwards)
+        self.wrist_rotation_speed = np.deg2rad(45.0)
+        self.wrist_rotation_acceleration = np.deg2rad(90.0)
+        self.wrist_rotation_settle_time = 0.2
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
          # Create subscriber and publisher topic
         self.marker_pub = self.create_publisher(Marker, "paper_marker", 10)
         self.status_pub = self.create_publisher(String, "/drawing/status", 10)
         self.urscript_pub = self.create_publisher(String, "/urscript_interface/script_command", 10)
+        self.resend_robot_program_client = self.create_client(
+            Trigger,
+            "/io_and_status_controller/resend_robot_program"
+        )
         self.stroke_queue = []
         self.stroke_id = 0
         self.create_subscription(Path,"/portrait/strokes", self.pen_path_callback,10)
@@ -62,16 +69,8 @@ class MotionNode(Node):
         self.show_paper = True
         self.show_axes = False
         # pencolor changing and pen docking parameters
-        self.pen_dock_file = "pen_storage_calibration.json"
-        self.pen_dock_down_distance = 0.045
-        self.pen_thread_lift_distance = 0.035
-        self.pen_release_lift_distance = 0.06
-        self.pen_twist_turns = 2.0
-        self.pen_twist_steps = 24
-        self.pen_clockwise_sign = -1.0
-        self.wrist_rotation_speed = 0.5
-        self.wrist_rotation_acceleration = 0.8
-        self.moveit_rotation_limit = np.pi
+        self.pen_calibration_data= "pen_storage_calibration.json"
+        self.pen_ready_to_attach_pos = 0.1916 # this is the fixed distance from the bottom of the pen storage to ready position for rotate  and attach (lock the pen)
         # Timer and flags for stroke reception
         self.inactivity_timer = None  # Timer to detect end of stroke messages
         self.strokes_reported = False  # Flag to report total strokes only once per batch
@@ -104,6 +103,34 @@ class MotionNode(Node):
 #----------------------------- 0. Service Handlers for Drawing Control --------------------------------
     def wait_for_motion(self):
         return self.moveit2.wait_until_executed()
+
+    def wait_for_fresh_joint_state(self, timeout=2.0):
+        self.moveit2.reset_new_joint_state_checker()
+        deadline = time.monotonic() + float(timeout)
+        while time.monotonic() < deadline:
+            rclpy.spin_once(self, timeout_sec=0.05)
+            if self.moveit2.new_joint_state_available:
+                return True
+        return False
+
+    def resend_robot_program(self, timeout=2.0):
+        if not self.resend_robot_program_client.wait_for_service(timeout_sec=0.2):
+            self.get_logger().warn("UR resend_robot_program service is not available")
+            return False
+
+        future = self.resend_robot_program_client.call_async(Trigger.Request())
+        deadline = time.monotonic() + float(timeout)
+        while time.monotonic() < deadline:
+            rclpy.spin_once(self, timeout_sec=0.05)
+            if future.done():
+                response = future.result()
+                if response.success:
+                    return True
+                self.get_logger().warn(f"UR resend_robot_program failed: {response.message}")
+                return False
+
+        self.get_logger().warn("Timed out waiting for UR resend_robot_program")
+        return False
 
     def stop_was_requested(self):
         return self.stop_requested
@@ -289,7 +316,8 @@ class MotionNode(Node):
                 self.get_logger().warn(f"Updated TCP offset in memory, but could not save calibration file: {e}")
             return
 
-        if isinstance(data, dict) and data.get("command") in ("move_vertical", "rotate_end_effector"):
+        utility_commands = ("move_vertical", "rotate_end_effector", "attach_pen", "detach_pen")
+        if isinstance(data, dict) and data.get("command") in utility_commands:
             if self.is_drawing or self.drawing_requested or self.go_home_requested or self.utility_motion_requested:
                 self.get_logger().warn("Cannot start utility motion while another motion is active or queued")
                 return
@@ -703,7 +731,7 @@ class MotionNode(Node):
         self.moveit2.move_to_pose(
             position=start_down.tolist(),
             quat_xyzw=quat,
-            cartesian=True
+            cartesian=True,
         )
         if not self.wait_for_motion() or self.stop_was_requested():
             return msg
@@ -836,6 +864,14 @@ class MotionNode(Node):
                 unit = "deg" if degrees else "rad"
                 self.status_pub.publish(String(data=f"Rotating end effector by {angle:.4f} {unit}"))
                 success = self.rotate_end_effector(angle, degrees=degrees)
+            elif command == "attach_pen":
+                pen_index = int(request.get("pen", 1))
+                self.status_pub.publish(String(data=f"Attaching pen {pen_index}"))
+                success = self.attach_pen(pen_index)
+            elif command == "detach_pen":
+                pen_index = int(request.get("pen", 1))
+                self.status_pub.publish(String(data=f"Detaching pen {pen_index}"))
+                success = self.detach_pen(pen_index)
             else:
                 raise RuntimeError(f"Unknown utility motion command: {command}")
 
@@ -919,7 +955,7 @@ class MotionNode(Node):
 #----------------------------- 6. Pen Attachment/Detachment --------------------------------
     def get_pen_ready_pose(self, pen_index):
             pen_index = int(pen_index)
-            json_path = os.path.join(os.getcwd(), "data", self.pen_dock_file)
+            json_path = os.path.join(os.getcwd(), "data", "pen_storage_calibration.json")
 
             with open(json_path, "r") as f:
                 data = json.load(f)
@@ -934,72 +970,57 @@ class MotionNode(Node):
                 np.array(pose_data["ready_orientation"], dtype=float),
             )
 
-    def move_to_tool_pose(self, position, quat, cartesian=True):
+    def detach_pen(self, pen_index):
+        # Get Ready Pose from JSON
+        ready_position, ready_quat = self.get_pen_ready_pose(pen_index)
+        # Go home first to ensure a consistent starting pose for MoveIt planning to the pen ready pose
+        self.go_home()
+        # Move to ready pose above the pen + extra distance to ensure pentip not gonna collide with top of pen storage 
+        new_ready_position = ready_position + np.array([0.0, 0.0, 0.15])  # Add 15 cm in z to be safely above
         self.moveit2.move_to_pose(
-            position=np.array(position, dtype=float).tolist(),
-            quat_xyzw=np.array(quat, dtype=float).tolist(),
-            cartesian=cartesian
+            position=new_ready_position.tolist(),
+            quat_xyzw=ready_quat.tolist(),
+            cartesian=True
         )
         if not self.wait_for_motion():
             if self.stop_was_requested():
                 return False
-            raise RuntimeError("MoveIt planned the motion, but execution did not complete")
-        return not self.stop_was_requested()
-
-    def rotate_quat_about_tool_z(self, quat, angle_radians):
-        tool_rotation = R.from_quat(quat)
-        delta_rotation = R.from_euler("z", angle_radians)
-        return (tool_rotation * delta_rotation).as_quat()
-
-    def detach_pen(self, pen_index):
-        ready_position, ready_quat = self.get_pen_ready_pose(pen_index)
-        down_position = ready_position + np.array([0.0, 0.0, -self.pen_dock_down_distance])
-        total_angle = self.pen_clockwise_sign * self.pen_twist_turns * 2.0 * np.pi
-
-        self.get_logger().info(f"Detaching pen {pen_index}")
-        if not self.move_to_tool_pose(ready_position, ready_quat, cartesian=True):
-            return False
-        if not self.move_to_tool_pose(down_position, ready_quat, cartesian=True):
-            return False
-
-        final_quat = ready_quat
-        for step in range(1, self.pen_twist_steps + 1):
-            if self.stop_was_requested():
-                return False
-            fraction = step / self.pen_twist_steps
-            quat = self.rotate_quat_about_tool_z(ready_quat, total_angle * fraction)
-            if not self.move_to_tool_pose(down_position, quat, cartesian=True):
-                return False
-            final_quat = quat
-
-        lift_position = ready_position + np.array([0.0, 0.0, self.pen_release_lift_distance])
-        return self.move_to_tool_pose(lift_position, final_quat, cartesian=True)
+            raise RuntimeError("MoveIt planned the wrist rotation, but execution did not complete")
+        # Move down to detach the pen
+        dist_tool_to_ready = new_ready_position[2] - ready_position[2]
+        self.move_vertical(-dist_tool_to_ready)
+        # Rotate in the opposite direction to unlock and drop the pen
+        self.rotate_end_effector(180.0, degrees=True)
+        self.rotate_end_effector(180.0, degrees=True)
+        # Go back up after dropping the pen
+        self.move_vertical(dist_tool_to_ready + 0.04)  # Move up past the original ready position to avoid collision with pen storage
+        # After detaching, move back to home.
+        self.go_home()
 
     def attach_pen(self, pen_index):
+        #Get Ready Pose from JSON
         ready_position, ready_quat = self.get_pen_ready_pose(pen_index)
-        start_position = ready_position + np.array([0.0, 0.0, -self.pen_dock_down_distance])
-        total_angle = -self.pen_clockwise_sign * self.pen_twist_turns * 2.0 * np.pi
-
-        self.get_logger().info(f"Attaching pen {pen_index}")
-        if not self.move_to_tool_pose(ready_position, ready_quat, cartesian=True):
-            return False
-        if not self.move_to_tool_pose(start_position, ready_quat, cartesian=True):
-            return False
-
-        final_quat = ready_quat
-        for step in range(1, self.pen_twist_steps + 1):
+        # Go home first to ensure a consistent starting pose for MoveIt planning to the pen ready pose
+        self.go_home()
+        new_ready_position = ready_position + np.array([0.0, 0.0, 0.05])  # Add 5 cm in z to be safely above    
+        #Move to ready pose above the pen
+        self.moveit2.move_to_pose(
+            position=new_ready_position.tolist(),
+            quat_xyzw=ready_quat.tolist(),
+            cartesian=True
+        )
+        if not self.wait_for_motion():
             if self.stop_was_requested():
                 return False
-            fraction = step / self.pen_twist_steps
-            position = start_position + np.array([0.0, 0.0, self.pen_thread_lift_distance * fraction])
-            quat = self.rotate_quat_about_tool_z(ready_quat, total_angle * fraction)
-            if not self.move_to_tool_pose(position, quat, cartesian=True):
-                return False
-            final_quat = quat
-
-        lift_position = ready_position + np.array([0.0, 0.0, self.pen_release_lift_distance])
-        return self.move_to_tool_pose(lift_position, final_quat, cartesian=True)
-
+            raise RuntimeError("MoveIt planned the wrist rotation, but execution did not complete")
+        #The ready to attach position is above the pen. Move down to grasp it.
+        dist_tool_to_ready = new_ready_position[2] - ready_position[2]
+        self.move_vertical(-dist_tool_to_ready)
+        # Twist while in contact to secure the pen, then lift up with the pen
+        self.rotate_end_effector(-180.0, degrees=True)
+        self.rotate_end_effector(-180.0, degrees=True)
+        # Lift up 10 cm with the pen
+        self.move_vertical(dist_tool_to_ready)
 #---------------------------------------------7. Cartesian Utility Motion-------------------------------
     def move_vertical(self, dist):
         transform = self.tf_buffer.lookup_transform(
@@ -1058,57 +1079,7 @@ class MotionNode(Node):
     def normalize_angle(self, angle):
         return (float(angle) + np.pi) % (2.0 * np.pi) - np.pi
 
-    # def rotate_end_effector(self, angle, degrees=True):
-    #     angle_radians = np.deg2rad(float(angle)) if degrees else float(angle)
-    #     if abs(angle_radians) < 1e-6:
-    #         self.get_logger().info("Rotation angle is zero; skipping wrist rotation")
-    #         return True
-
-    #     direction = "positive" if angle_radians >= 0 else "negative"
-    #     unit = "deg" if degrees else "rad"
-    #     if abs(angle_radians) <= self.moveit_rotation_limit:
-    #         joint_positions = self.get_current_joint_positions()
-    #         joint_positions[-1] += angle_radians
-
-    #         self.get_logger().info(
-    #             f"Rotating wrist_3_joint {direction} by {abs(float(angle)):.3f} {unit} using MoveIt"
-    #         )
-
-    #         self.moveit2.move_to_configuration(joint_positions)
-
-    #         if not self.wait_for_motion():
-    #             if self.stop_was_requested():
-    #                 return False
-    #             raise RuntimeError("MoveIt planned the wrist rotation, but execution did not complete")
-
-    #         return not self.stop_was_requested()
-
-    #     self.get_logger().info(
-    #         f"Rotating wrist_3_joint {direction} by {abs(float(angle)):.3f} {unit} using URScript speedj"
-    #     )
-
-    #     speed = np.sign(angle_radians) * abs(self.wrist_rotation_speed)
-    #     duration = abs(angle_radians) / abs(self.wrist_rotation_speed)
-    #     command = (
-    #         "speedj("
-    #         f"[0.0, 0.0, 0.0, 0.0, 0.0, {speed:.6f}], "
-    #         f"{self.wrist_rotation_acceleration:.6f}, "
-    #         f"{duration:.6f}"
-    #         ")"
-    #     )
-
-    #     self.urscript_pub.publish(String(data=command))
-    #     start_time = time.monotonic()
-    #     while time.monotonic() - start_time < duration:
-    #         if self.stop_was_requested():
-    #             self.urscript_pub.publish(String(data="stopj(2.0)"))
-    #             return False
-    #         time.sleep(0.02)
-
-    #     self.urscript_pub.publish(String(data="stopj(2.0)"))
-
-    #     return not self.stop_was_requested()
-
+   
     def rotate_end_effector(self, angle, degrees=True):
         angle_radians = np.deg2rad(float(angle)) if degrees else float(angle)
         if abs(angle_radians) < 1e-6:
@@ -1118,18 +1089,33 @@ class MotionNode(Node):
         direction = "positive" if angle_radians >= 0 else "negative"
         unit = "deg" if degrees else "rad"
         self.get_logger().info(
-            f"Rotating wrist_3_joint {direction} by {abs(float(angle)):.3f} {unit} using MoveIt"
+            f"Rotating wrist_3_joint {direction} by {abs(float(angle)):.3f} {unit} using URScript speedj"
         )
 
-        joint_positions = self.get_current_joint_positions()
-        joint_positions[-1] += angle_radians
+        speed = np.sign(angle_radians) * abs(self.wrist_rotation_speed)
+        duration = abs(angle_radians) / abs(self.wrist_rotation_speed)
+        command = (
+            "speedj("
+            f"[0.0, 0.0, 0.0, 0.0, 0.0, {speed:.6f}], "
+            f"{self.wrist_rotation_acceleration:.6f}, "
+            f"{duration:.6f}"
+            ")"
+        )
 
-        self.moveit2.move_to_configuration(joint_positions)
-
-        if not self.wait_for_motion():
+        self.urscript_pub.publish(String(data=command))
+        start_time = time.monotonic()
+        while time.monotonic() - start_time < duration:
             if self.stop_was_requested():
+                self.urscript_pub.publish(String(data="stopj(2.0)"))
                 return False
-            raise RuntimeError("MoveIt planned the wrist rotation, but execution did not complete")
+            time.sleep(0.02)
+
+        self.urscript_pub.publish(String(data="stopj(2.0)"))
+        if not self.resend_robot_program():
+            return False
+        time.sleep(self.wrist_rotation_settle_time)
+        if not self.wait_for_fresh_joint_state():
+            self.get_logger().warn("Timed out waiting for fresh joint state after wrist speedj")
 
         return not self.stop_was_requested()
 

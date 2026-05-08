@@ -53,6 +53,7 @@ class CalibrationNode(Node):
         self.tool_points = [None, None, None]
 
         self.current_index = None
+        self.current_pen_index = None
         self.preview_point = None
         self.load_existing_calibration()
         self.publish_tcp_offset_status("startup", recalculated=False)
@@ -94,6 +95,34 @@ class CalibrationNode(Node):
 
         return T[0:3, 3], T_new[0:3, 3]
 
+    def get_tool_pose(self):
+        transform = self.tf_buffer.lookup_transform(
+            "base_link",
+            "tool0",
+            rclpy.time.Time()
+        )
+
+        translation = transform.transform.translation
+        rotation = transform.transform.rotation
+        return (
+            np.array([translation.x, translation.y, translation.z], dtype=float),
+            np.array([rotation.x, rotation.y, rotation.z, rotation.w], dtype=float),
+        )
+
+    def get_current_joint_state_data(self):
+        joint_state = self.moveit2.joint_state
+        if joint_state is None:
+            raise RuntimeError("Joint state is not ready yet")
+
+        joint_names = ur.joint_names()
+        joint_positions = []
+        for joint_name in joint_names:
+            if joint_name not in joint_state.name:
+                raise RuntimeError(f"Joint state does not contain {joint_name}")
+            joint_positions.append(float(joint_state.position[joint_state.name.index(joint_name)]))
+
+        return joint_names, joint_positions
+
     def command_callback(self, msg):
         try:
             data = json.loads(msg.data)
@@ -104,27 +133,51 @@ class CalibrationNode(Node):
             self.set_tcp_offset(data.get("tcp_offset"))
             return
 
+        if isinstance(data, dict) and data.get("command") == "save_pen_ready_pose":
+            try:
+                self.current_pen_index = int(data.get("pen"))
+            except (TypeError, ValueError):
+                self.get_logger().warn(f"Invalid pen index: {data.get('pen')}")
+                return
+
+            if self.current_pen_index not in (1, 2, 3):
+                self.get_logger().warn(f"Pen index must be 1, 2, or 3: {self.current_pen_index}")
+                self.current_pen_index = None
+                return
+
+            self.current_index = None
+            self.get_logger().info(f"Editing Pen {self.current_pen_index} ready pose")
+            self.publish_pen_preview_status()
+            return
+
         if msg.data in ("show_paper", "hide_paper", "show_axes", "hide_axes"):
             return
 
         elif msg.data == "set_p1":
             self.current_index = 0
+            self.current_pen_index = None
             self.get_logger().info("Editing P1")
 
         elif msg.data == "set_p2":
             self.current_index = 1
+            self.current_pen_index = None
             self.get_logger().info("Editing P2")
 
         elif msg.data == "set_p3":
             self.current_index = 2
+            self.current_pen_index = None
             self.get_logger().info("Editing P3")
 
         elif msg.data == "toggle_freedrive":
             self.get_logger().info("Toggle freedrive (implement here)")
 
         elif msg.data == "confirm":
+            if self.current_pen_index is not None:
+                self.confirm_pen_ready_pose()
+                return
+
             if self.current_index is None:
-                self.get_logger().warn("Select point first (1/2/3)")
+                self.get_logger().warn("Select point first (1/2/3) or pen first (Pen 1/2/3)")
                 return
 
             try:
@@ -154,6 +207,9 @@ class CalibrationNode(Node):
                 self.get_logger().info(
                     f"P{self.current_index+1} preview: {pos}"
                 )
+
+        if self.current_pen_index is not None:
+            self.publish_pen_preview_status()
 
     # def reset_calibration(self):
     #     self.points = [None, None, None]
@@ -186,6 +242,11 @@ class CalibrationNode(Node):
         data_dir = self.get_workspace_data_path()
         os.makedirs(data_dir, exist_ok=True)
         return os.path.join(data_dir, "paper_calibration.json")
+
+    def get_pen_storage_json_path(self):
+        data_dir = self.get_workspace_data_path()
+        os.makedirs(data_dir, exist_ok=True)
+        return os.path.join(data_dir, "pen_storage_calibration.json")
 
     def load_calibration_file(self):
         json_path = self.get_calibration_json_path()
@@ -221,6 +282,81 @@ class CalibrationNode(Node):
         if message:
             payload["message"] = message
         self.status_pub.publish(String(data=json.dumps(payload)))
+
+    def publish_pen_preview_status(self):
+        if self.current_pen_index is None:
+            return
+
+        try:
+            position, orientation = self.get_tool_pose()
+        except Exception as e:
+            self.get_logger().warn(f"TF not ready for Pen {self.current_pen_index} preview: {e}")
+            return
+
+        self.get_logger().info(
+            f"Pen {self.current_pen_index} ready pose preview: "
+            f"position={position}, orientation={orientation}"
+        )
+
+        self.status_pub.publish(String(data=json.dumps({
+            "command": "pen_ready_pose_preview",
+            "pen": int(self.current_pen_index),
+            "ready_position": position.tolist(),
+            "ready_orientation": orientation.tolist(),
+            "message": (
+                f"Pen {self.current_pen_index} preview "
+                f"x={position[0]:.4f}, y={position[1]:.4f}, z={position[2]:.4f} "
+                "(tool0 pose, no TCP offset). Press Confirm Point to save."
+            ),
+        })))
+
+    def confirm_pen_ready_pose(self):
+        pen_index = self.current_pen_index
+
+        try:
+            position, orientation = self.get_tool_pose()
+            joint_names, joint_positions = self.get_current_joint_state_data()
+        except Exception as e:
+            self.get_logger().warn(f"Cannot save Pen {pen_index} ready pose: {e}")
+            return
+
+        json_path = self.get_pen_storage_json_path()
+        try:
+            with open(json_path, "r") as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {}
+
+        key = f"pen_{pen_index}"
+        data[key] = {
+            "ready_position": position.tolist(),
+            "ready_orientation": orientation.tolist(),
+            "joint_names": list(joint_names),
+            "joint_positions": joint_positions,
+        }
+
+        with open(json_path, "w") as f:
+            json.dump(data, f, indent=4)
+
+        self.get_logger().info(
+            f"Pen {pen_index} ready pose CONFIRMED: "
+            f"position={position}, orientation={orientation}"
+        )
+
+        self.status_pub.publish(String(data=json.dumps({
+            "command": "pen_ready_pose_saved",
+            "pen": int(pen_index),
+            "ready_position": position.tolist(),
+            "ready_orientation": orientation.tolist(),
+            "joint_names": list(joint_names),
+            "joint_positions": joint_positions,
+            "message": (
+                f"Saved Pen {pen_index} ready pose "
+                f"x={position[0]:.4f}, y={position[1]:.4f}, z={position[2]:.4f}."
+            ),
+        })))
+
+        self.current_pen_index = None
 
     def set_tcp_offset(self, tcp_offset):
         try:
