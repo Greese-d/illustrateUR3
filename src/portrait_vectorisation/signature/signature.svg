@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 420" width="1400" height="420" fill="none">
+
+  <g stroke="black" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+
+    <!-- Minimal UR-style robot arm -->
+    <circle cx="120" cy="250" r="18" fill="black" stroke="none"/>
+    <path d="M120 250 L190 185"/>
+
+    <circle cx="190" cy="185" r="14" fill="black" stroke="none"/>
+    <path d="M190 185 L270 155"/>
+
+    <circle cx="270" cy="155" r="12" fill="black" stroke="none"/>
+    <path d="M120 250 L85 325"/>
+
+    <!-- Pen tip -->
+    <path d="M85 325 L72 350"/>
+
+    <!-- Signature underline -->
+    <path d="M90 335 C300 270, 650 250, 980 305"/>
+
+    <!-- Illustrate lettering -->
+
+    <!-- I -->
+    <path d="M360 145 L345 265"/>
+
+    <!-- l -->
+    <path d="M405 135 L390 265"/>
+
+    <!-- l -->
+    <path d="M455 135 L440 265"/>
+
+    <!-- u -->
+    <path d="M495 185 C495 255, 555 255, 565 185"/>
+
+    <!-- s -->
+    <path d="M640 185 C595 160, 585 220, 640 220 C690 220, 680 280, 625 260"/>
+
+    <!-- t -->
+    <path d="M735 145 L715 275"/>
+    <path d="M685 185 L760 185"/>
+
+    <!-- r -->
+    <path d="M790 265 L805 185 C820 165, 850 165, 865 185"/>
+
+    <!-- a -->
+    <path d="M955 225 C955 175, 890 175, 890 225 C890 275, 955 275, 955 225 Z"/>
+    <path d="M955 185 L955 265"/>
+
+    <!-- t -->
+    <path d="M1035 145 L1015 275"/>
+    <path d="M985 185 L1060 185"/>
+
+    <!-- e -->
+    <path d="M1135 215 C1120 175, 1065 180, 1060 225 C1055 275, 1125 285, 1145 245"/>
+    <path d="M1070 225 L1130 225"/>
+
+    <!-- UR3 -->
+    <path d="M1180 150 L1180 245 C1180 290, 1235 290, 1235 245 L1235 150"/>
+
+    <path d="M1280 290 L1280 150 L1340 150 C1375 150, 1385 225, 1340 225 L1280 225"/>
+    <path d="M1335 225 L1390 290"/>
+
+  </g>
+
+</svg>

@@ -11,6 +11,7 @@ setup(
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/masks', glob('masks/*.png')),
+        ('share/' + package_name + '/signature', glob('signature/*.svg')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

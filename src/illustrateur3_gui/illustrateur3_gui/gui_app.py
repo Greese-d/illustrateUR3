@@ -30,10 +30,15 @@ class GuiApp:
         self.pending_capture = False
         self.go_home_pending = False
         self.stop_pending = False
+        self.capture_countdown_active = False
+        self.capture_countdown_seconds = 3
+        self.countdown_text = ""
         self.can_start_drawing = False
         self.resume_available = False
         self.displayed_state = "IDLE"
         self.attached_pen_index = None
+        self.is_fullscreen = False
+        self.windowed_geometry = self.root.geometry()
 
         self.setup_styles()
         self.build_layout()
@@ -48,6 +53,9 @@ class GuiApp:
         self.update_ui_for_state("IDLE")
 
         self.root.after(50, self.poll_ros)
+
+        self.root.bind("<F11>", lambda event: self.toggle_fullscreen())
+        self.root.bind("<Escape>", lambda event: self.exit_fullscreen())
 
     def setup_styles(self):
         style = ttk.Style()
@@ -76,6 +84,7 @@ class GuiApp:
         top_frame.grid(row=0, column=0, sticky="ew")
         top_frame.columnconfigure(0, weight=1)
         top_frame.columnconfigure(1, weight=0)
+        top_frame.columnconfigure(2, weight=0)
 
         title_label = ttk.Label(
             top_frame,
@@ -91,20 +100,28 @@ class GuiApp:
         )
         self.state_label.grid(row=0, column=1, sticky="e", padx=(20, 0))
 
+        self.fullscreen_button = ttk.Button(
+            top_frame,
+            text="Fullscreen",
+            style="TabSwitch.TButton",
+            command=self.toggle_fullscreen
+        )
+        self.fullscreen_button.grid(row=0, column=2, sticky="e", padx=(12, 0))
+
         # =========================
         # Main Content Area
         # =========================
-        content_frame = ttk.Frame(self.root, padding=(12, 0, 12, 12))
-        content_frame.grid(row=1, column=0, sticky="nsew")
-        content_frame.columnconfigure(0, weight=1)
-        content_frame.columnconfigure(1, weight=1)
-        content_frame.rowconfigure(0, weight=1)
+        self.content_frame = ttk.Frame(self.root, padding=(12, 0, 12, 12))
+        self.content_frame.grid(row=1, column=0, sticky="nsew")
+        self.content_frame.columnconfigure(0, weight=2, minsize=520)
+        self.content_frame.columnconfigure(1, weight=3, minsize=650)
+        self.content_frame.rowconfigure(0, weight=1)
 
         # -------------------------
         # Camera Panel
         # -------------------------
         self.camera_frame = ttk.LabelFrame(
-            content_frame,
+            self.content_frame,
             text="Live Camera",
             style="Panel.TLabelframe"
         )
@@ -127,7 +144,7 @@ class GuiApp:
         # Right Panel
         # -------------------------
         self.preview_frame = ttk.LabelFrame(
-            content_frame,
+            self.content_frame,
             text="Output",
             style="Panel.TLabelframe"
         )
@@ -193,7 +210,7 @@ class GuiApp:
             relief="ridge",
             bd=2
         )
-        self.preview_placeholder.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+        self.preview_placeholder.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
 
         self.preview_notebook.add(self.preview_tab, text="Preview")
 
@@ -528,6 +545,48 @@ class GuiApp:
         self.add_log("GUI started successfully.")
         self.add_log("Waiting for camera, preview, and robot status topics.")
 
+    def toggle_fullscreen(self):
+        if self.is_fullscreen:
+            self.exit_fullscreen()
+        else:
+            self.enter_fullscreen()
+
+    def enter_fullscreen(self):
+        self.windowed_geometry = self.root.geometry()
+        self.is_fullscreen = True
+
+        # True fullscreen, not just maximized
+        self.root.attributes("-fullscreen", True)
+
+        self.fullscreen_button.config(text="Exit Fullscreen")
+        self.status_text.config(text="Fullscreen mode enabled.")
+        self.add_log("Entered fullscreen mode.")
+
+        self.apply_fullscreen_layout()
+
+    def exit_fullscreen(self):
+        if not self.is_fullscreen:
+            return
+
+        self.is_fullscreen = False
+        self.root.attributes("-fullscreen", False)
+        self.root.geometry(self.windowed_geometry)
+
+        self.fullscreen_button.config(text="Fullscreen")
+        self.status_text.config(text="Windowed mode enabled.")
+        self.add_log("Exited fullscreen mode.")
+
+        self.apply_windowed_layout()
+
+    def apply_fullscreen_layout(self):
+        self.content_frame.columnconfigure(0, weight=1, minsize=720)
+        self.content_frame.columnconfigure(1, weight=1, minsize=720)
+
+    def apply_windowed_layout(self):
+        # Restore balanced windowed layout.
+        self.content_frame.columnconfigure(0, weight=1, minsize=0)
+        self.content_frame.columnconfigure(1, weight=1, minsize=0)
+
     def add_log(self, message):
         self.log_box.config(state="normal")
         self.log_box.insert("end", f"{message}\n")
@@ -700,6 +759,42 @@ class GuiApp:
         self.pending_capture = True
         self.ros_node.clear_strokes(self.on_clear_strokes_response)
 
+    def start_capture_countdown(self, seconds=3):
+        if self.capture_countdown_active:
+            return
+
+        self.capture_countdown_active = True
+        self.capture_button.config(state="disabled")
+
+        self.status_text.config(
+            text=f"Thumbs up detected. Capturing in {seconds}..."
+        )
+        self.add_log(f"Capture countdown started: {seconds} seconds.")
+
+        self._capture_countdown_tick(seconds)
+
+
+    def _capture_countdown_tick(self, remaining):
+        if remaining > 0:
+            self.status_text.config(
+                text=f"Get ready! Capturing portrait in {remaining}..."
+            )
+            self.countdown_text = str(remaining)
+            self.add_log(f"Capture countdown: {remaining}")
+
+            self.root.after(
+                1000,
+                lambda: self._capture_countdown_tick(remaining - 1)
+            )
+            return
+
+        self.countdown_text = ""
+        self.status_text.config(text="Capturing portrait now...")
+        self.add_log("Capture countdown finished. Capturing portrait.")
+
+        self.capture_countdown_active = False
+        self.trigger_capture(source="gesture: THUMBS_UP countdown")
+
     def on_capture(self):
         self.trigger_capture(source="button")
 
@@ -732,10 +827,12 @@ class GuiApp:
         if gesture_name == "THUMBS_UP":
             self.last_gesture_time = now
 
-            self.status_text.config(text="Thumbs up detected. Capturing portrait...")
-            self.add_log("Gesture detected: THUMBS_UP -> capture portrait")
+            if self.capture_countdown_active:
+                self.add_log("Thumbs up ignored because capture countdown is already active.")
+                return
 
-            self.trigger_capture(source="gesture: THUMBS_UP")
+            self.add_log("Gesture detected: THUMBS_UP -> starting 3 second capture countdown")
+            self.start_capture_countdown(seconds=3)
             return
 
         if gesture_name == "THUMBS_DOWN":
@@ -785,19 +882,42 @@ class GuiApp:
         self.ros_node.get_logger().warn("Emergency stop requested")
 
     def render_frame_to_label(self, frame_bgr, target_label, which):
+        target_label.update_idletasks()
+
         label_w = max(target_label.winfo_width(), 320)
         label_h = max(target_label.winfo_height(), 240)
 
         frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
         h, w = frame_rgb.shape[:2]
+
+        # Fit the image dynamically inside the available widget area.
         scale = min(label_w / w, label_h / h)
+
         new_w = max(1, int(w * scale))
         new_h = max(1, int(h * scale))
 
-        resized = cv2.resize(frame_rgb, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+        resized = cv2.resize(frame_rgb, (new_w, new_h), interpolation=interpolation)
 
-        pil_img = PILImage.fromarray(resized)
+        # Put resized image onto a dark canvas exactly the size of the label.
+        # This makes fullscreen resizing look cleaner and centered.
+        canvas = cv2.cvtColor(
+            cv2.copyMakeBorder(
+                resized,
+                top=max(0, (label_h - new_h) // 2),
+                bottom=max(0, label_h - new_h - ((label_h - new_h) // 2)),
+                left=max(0, (label_w - new_w) // 2),
+                right=max(0, label_w - new_w - ((label_w - new_w) // 2)),
+                borderType=cv2.BORDER_CONSTANT,
+                value=(43, 43, 43),
+            ),
+            cv2.COLOR_RGB2BGR
+        )
+
+        canvas_rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
+
+        pil_img = PILImage.fromarray(canvas_rgb)
         tk_img = ImageTk.PhotoImage(image=pil_img)
 
         target_label.config(image=tk_img, text="")
@@ -810,11 +930,78 @@ class GuiApp:
         elif which == "live_drawing":
             self.live_drawing_tk_image = tk_img
 
+    def crop_preview_to_content(self, frame_bgr, padding=40):
+        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+
+        # Detect dark drawing/logo pixels on the white page.
+        # Higher number = crops more white space.
+        mask = gray < 245
+
+        coords = cv2.findNonZero(mask.astype("uint8"))
+        if coords is None:
+            return frame_bgr
+
+        x, y, w, h = cv2.boundingRect(coords)
+
+        x1 = max(0, x - padding)
+        y1 = max(0, y - padding)
+        x2 = min(frame_bgr.shape[1], x + w + padding)
+        y2 = min(frame_bgr.shape[0], y + h + padding)
+
+        return frame_bgr[y1:y2, x1:x2]
+
     def on_camera_frame(self, frame_bgr):
-        self.render_frame_to_label(frame_bgr, self.camera_placeholder, "camera")
+        display_frame = frame_bgr.copy()
+
+        if self.countdown_text:
+            h, w = display_frame.shape[:2]
+
+            text = self.countdown_text
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 4.0
+            white_thickness = 8
+            outline_thickness = 16
+
+            text_size, baseline = cv2.getTextSize(
+                text,
+                font,
+                font_scale,
+                white_thickness
+            )
+
+            text_w, text_h = text_size
+            x = int((w - text_w) / 2)
+            y = int((h + text_h) / 2)
+
+            # Black outline for visibility, no grey box
+            cv2.putText(
+                display_frame,
+                text,
+                (x, y),
+                font,
+                font_scale,
+                (0, 0, 0),
+                outline_thickness,
+                cv2.LINE_AA
+            )
+
+            # Bold white countdown text
+            cv2.putText(
+                display_frame,
+                text,
+                (x, y),
+                font,
+                font_scale,
+                (255, 255, 255),
+                white_thickness,
+                cv2.LINE_AA
+            )
+
+        self.render_frame_to_label(display_frame, self.camera_placeholder, "camera")
 
     def on_preview_frame(self, frame_bgr):
-        self.render_frame_to_label(frame_bgr, self.preview_placeholder, "preview")
+        cropped = self.crop_preview_to_content(frame_bgr, padding=50)
+        self.render_frame_to_label(cropped, self.preview_placeholder, "preview")
 
     def on_live_drawing_frame(self, frame_bgr):
         self.render_frame_to_label(
