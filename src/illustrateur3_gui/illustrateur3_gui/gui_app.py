@@ -37,6 +37,8 @@ class GuiApp:
         self.resume_available = False
         self.displayed_state = "IDLE"
         self.attached_pen_index = None
+        self.is_fullscreen = False
+        self.windowed_geometry = self.root.geometry()
 
         self.setup_styles()
         self.build_layout()
@@ -51,6 +53,9 @@ class GuiApp:
         self.update_ui_for_state("IDLE")
 
         self.root.after(50, self.poll_ros)
+
+        self.root.bind("<F11>", lambda event: self.toggle_fullscreen())
+        self.root.bind("<Escape>", lambda event: self.exit_fullscreen())
 
     def setup_styles(self):
         style = ttk.Style()
@@ -79,6 +84,7 @@ class GuiApp:
         top_frame.grid(row=0, column=0, sticky="ew")
         top_frame.columnconfigure(0, weight=1)
         top_frame.columnconfigure(1, weight=0)
+        top_frame.columnconfigure(2, weight=0)
 
         title_label = ttk.Label(
             top_frame,
@@ -94,20 +100,28 @@ class GuiApp:
         )
         self.state_label.grid(row=0, column=1, sticky="e", padx=(20, 0))
 
+        self.fullscreen_button = ttk.Button(
+            top_frame,
+            text="Fullscreen",
+            style="TabSwitch.TButton",
+            command=self.toggle_fullscreen
+        )
+        self.fullscreen_button.grid(row=0, column=2, sticky="e", padx=(12, 0))
+
         # =========================
         # Main Content Area
         # =========================
-        content_frame = ttk.Frame(self.root, padding=(12, 0, 12, 12))
-        content_frame.grid(row=1, column=0, sticky="nsew")
-        content_frame.columnconfigure(0, weight=1)
-        content_frame.columnconfigure(1, weight=2)
-        content_frame.rowconfigure(0, weight=1)
+        self.content_frame = ttk.Frame(self.root, padding=(12, 0, 12, 12))
+        self.content_frame.grid(row=1, column=0, sticky="nsew")
+        self.content_frame.columnconfigure(0, weight=2, minsize=520)
+        self.content_frame.columnconfigure(1, weight=3, minsize=650)
+        self.content_frame.rowconfigure(0, weight=1)
 
         # -------------------------
         # Camera Panel
         # -------------------------
         self.camera_frame = ttk.LabelFrame(
-            content_frame,
+            self.content_frame,
             text="Live Camera",
             style="Panel.TLabelframe"
         )
@@ -130,7 +144,7 @@ class GuiApp:
         # Right Panel
         # -------------------------
         self.preview_frame = ttk.LabelFrame(
-            content_frame,
+            self.content_frame,
             text="Output",
             style="Panel.TLabelframe"
         )
@@ -530,6 +544,48 @@ class GuiApp:
 
         self.add_log("GUI started successfully.")
         self.add_log("Waiting for camera, preview, and robot status topics.")
+
+    def toggle_fullscreen(self):
+        if self.is_fullscreen:
+            self.exit_fullscreen()
+        else:
+            self.enter_fullscreen()
+
+    def enter_fullscreen(self):
+        self.windowed_geometry = self.root.geometry()
+        self.is_fullscreen = True
+
+        # True fullscreen, not just maximized
+        self.root.attributes("-fullscreen", True)
+
+        self.fullscreen_button.config(text="Exit Fullscreen")
+        self.status_text.config(text="Fullscreen mode enabled.")
+        self.add_log("Entered fullscreen mode.")
+
+        self.apply_fullscreen_layout()
+
+    def exit_fullscreen(self):
+        if not self.is_fullscreen:
+            return
+
+        self.is_fullscreen = False
+        self.root.attributes("-fullscreen", False)
+        self.root.geometry(self.windowed_geometry)
+
+        self.fullscreen_button.config(text="Fullscreen")
+        self.status_text.config(text="Windowed mode enabled.")
+        self.add_log("Exited fullscreen mode.")
+
+        self.apply_windowed_layout()
+
+    def apply_fullscreen_layout(self):
+        self.content_frame.columnconfigure(0, weight=1, minsize=720)
+        self.content_frame.columnconfigure(1, weight=1, minsize=720)
+
+    def apply_windowed_layout(self):
+        # Restore balanced windowed layout.
+        self.content_frame.columnconfigure(0, weight=1, minsize=0)
+        self.content_frame.columnconfigure(1, weight=1, minsize=0)
 
     def add_log(self, message):
         self.log_box.config(state="normal")
