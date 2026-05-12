@@ -101,7 +101,7 @@ def generate_launch_description():
         output='screen',
         condition=IfCondition(LaunchConfiguration('launch_camera')),
         parameters=[{
-            'device': 0,
+            'device': 1,
             'fps': 30.0,
             'width': 1920,
             'height': 1080,

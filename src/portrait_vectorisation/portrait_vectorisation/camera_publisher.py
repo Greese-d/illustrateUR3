@@ -10,7 +10,7 @@ class CameraPublisher(Node):
     def __init__(self):
         super().__init__("camera_publisher")
 
-        self.declare_parameter("device", 1)
+        self.declare_parameter("device", 0)
         self.declare_parameter("fps", 30.0)
         self.declare_parameter("width", 1920)
         self.declare_parameter("height", 1080)
