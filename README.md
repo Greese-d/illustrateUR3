@@ -144,7 +144,7 @@ The system is designed to be operated hands-free — the subject stands in front
 | 🤙 Green Giant (index + middle + thumb) | Start drawing |
 | ☝️ Point (index finger) | Apply **moustache** mask |
 | ✌️ Peace (index + middle) | Apply **hat** mask |
-| 🤟 Three fingers (index + middle + ring) | Apply **glasses** mask |
+| Three fingers (index + middle + ring) | Apply **glasses** mask |
 | Four fingers (all except thumb) | Apply **nose** mask |
 
 A 2-second cooldown applies between gestures to prevent accidental triggers. All gestures can also be triggered via the corresponding GUI buttons.
@@ -539,22 +539,22 @@ python -m gesture_vision.gesture_recognizer
 
 ## Troubleshooting & FAQs
 
-**Camera not detected**
+**Camera not detected:**
 Change `device` from `1` to `0`:
 ```bash
 ros2 run portrait_vectorisation camera_publisher --ros-args -p device:=0
 ```
 
-**Portrait preview is blank or contains only noise**
+**Portrait preview is blank or contains only noise:**
 The subject may not be detected by MediaPipe. Ensure controlled lighting with a distinct background. Try raising the Canny thresholds (`20/50` → `40/80`) in `portrait_processor.py`.
 
-**Strokes are not received by the motion node**
+**Strokes are not received by the motion node:**
 Increase `stroke_publish_delay` (try `0.1` s). Verify publishing with:
 ```bash
 ros2 topic echo /portrait/strokes
 ```
 
-**Robot does not move after `/start_drawing`**
+**Robot does not move after `/start_drawing`:**
 Ensure paper calibration is complete and `data/paper_calibration.json` exists. Check for errors:
 ```bash
 ros2 topic echo /state
@@ -562,20 +562,20 @@ ros2 topic echo /drawing/status
 ```
 If using the real robot, confirm `use_fake_hardware:=false` was passed to the launch command.
 
-**Drawing is offset or distorted on paper**
+**Drawing is offset or distorted on paper:**
 Re-run paper calibration. Verify `tcp_offset` in `motion_node.py` matches the physical pen length. Ensure P1, P2, P3 were recorded with the pen tip touching the paper surface.
 
-**Mask overlay is not appearing**
+**Mask overlay is not appearing:**
 Ensure the face is clearly visible and near-frontal. Check the active mask:
 ```bash
 ros2 param get /image_processing_node mask_type
 ```
 
-**Gestures are not being detected**
+**Gestures are not being detected:**
 Confirm the gesture recognizer is running in the virtual environment (not system Python). Check `/gesture` topic:
 ```bash
 ros2 topic echo /gesture
 ```
 
-**RViz2 only shows one stroke at a time**
+**RViz2 only shows one stroke at a time:**
 Subscribe to `/portrait/markers` (MarkerArray) instead of `/portrait/strokes`. The MarkerArray sends all strokes in a single message.
