@@ -790,7 +790,18 @@ class MotionNode(Node):
     #     quat_xyzw=self.fixed_orientation,
     #     cartesian=True
     # )
-        self.moveit2.move_to_configuration([1.57, -1.57, 1.57, -1.57, -1.57, 0.0])
+        home_configuration = [1.57, -1.57, 1.57, -1.57, -1.57, 0.0]
+
+        if not self.wait_for_fresh_joint_state():
+            self.get_logger().warn("Planning home motion without a fresh joint state")
+
+        joint_trajectory = self.moveit2.plan(joint_positions=home_configuration)
+        if joint_trajectory is None:
+            raise RuntimeError("MoveIt could not plan the home motion")
+
+        joint_trajectory = self.unwrap_wrist_trajectory_to_current_state(joint_trajectory)
+        self.moveit2.execute(joint_trajectory)
+
         if not self.wait_for_motion():
             if self.stop_was_requested():
                 return False
@@ -976,7 +987,7 @@ class MotionNode(Node):
         # Go home first to ensure a consistent starting pose for MoveIt planning to the pen ready pose
         self.go_home()
         # Move to ready pose above the pen + extra distance to ensure pentip not gonna collide with top of pen storage 
-        new_ready_position = ready_position + np.array([0.0, 0.0, 0.15])  # Add 15 cm in z to be safely above
+        new_ready_position = ready_position + np.array([0.0, 0.0, 0.20])  # Add 20 cm in z to be safely above
         self.moveit2.move_to_pose(
             position=new_ready_position.tolist(),
             quat_xyzw=ready_quat.tolist(),
@@ -990,23 +1001,38 @@ class MotionNode(Node):
         dist_tool_to_ready = new_ready_position[2] - ready_position[2]
         self.move_vertical(-dist_tool_to_ready)
         # Rotate in the opposite direction to unlock and drop the pen
-        self.rotate_end_effector(180.0, degrees=True)
-        self.rotate_end_effector(180.0, degrees=True)
+        if not self.rotate_end_effector(-300.0, degrees=True):
+            return False
+        if not self.rotate_end_effector(-300.0, degrees=True):
+            return False    
         # Go back up after dropping the pen
-        self.move_vertical(dist_tool_to_ready + 0.04)  # Move up past the original ready position to avoid collision with pen storage
+        if not self.move_vertical(dist_tool_to_ready):  # Move up past the original ready position to avoid collision with pen storage
+            return False
+        if not self.rotate_end_effector(600, degrees=True):  # Rotate back to original orientation after detaching the pen
+            return False    
         # After detaching, move back to home.
-        self.go_home()
+        return self.go_home()
 
     def attach_pen(self, pen_index):
         #Get Ready Pose from JSON
         ready_position, ready_quat = self.get_pen_ready_pose(pen_index)
         # Go home first to ensure a consistent starting pose for MoveIt planning to the pen ready pose
         self.go_home()
-        new_ready_position = ready_position + np.array([0.0, 0.0, 0.05])  # Add 5 cm in z to be safely above    
+        new_ready_position = ready_position + np.array([0.0, 0.0, 0.08])  # Add 8 cm in z to be safely above    
         #Move to ready pose above the pen
         self.moveit2.move_to_pose(
             position=new_ready_position.tolist(),
-            quat_xyzw=ready_quat.tolist(),
+            quat_xyzw=ready_quat.tolist(),  # Use fixed orientation for better reliability in attaching the pen, since the wrist rotation will be handled by URScript separately from MoveIt
+            cartesian=True
+        )
+        if not self.wait_for_motion():
+            if self.stop_was_requested():
+                return False
+            raise RuntimeError("MoveIt planned the wrist rotation, but execution did not complete")
+        #rotate to fix orientation for vertical approach to grasp the pen, since the wrist rotation will be handled by URScript separately from MoveIt
+        self.moveit2.move_to_pose(
+            position=new_ready_position.tolist(),
+            quat_xyzw=self.fixed_orientation,  # Override orientation to fixed for the vertical approach to grasp the pen, since the wrist rotation will be handled by URScript separately from MoveIt  
             cartesian=True
         )
         if not self.wait_for_motion():
@@ -1017,11 +1043,48 @@ class MotionNode(Node):
         dist_tool_to_ready = new_ready_position[2] - ready_position[2]
         self.move_vertical(-dist_tool_to_ready)
         # Twist while in contact to secure the pen, then lift up with the pen
-        self.rotate_end_effector(-180.0, degrees=True)
-        self.rotate_end_effector(-180.0, degrees=True)
+        if not self.rotate_end_effector(300.0, degrees=True):
+            return False
+        if not self.rotate_end_effector(300.0, degrees=True):
+            return False
         # Lift up 10 cm with the pen
-        self.move_vertical(dist_tool_to_ready)
+        if not self.move_vertical(dist_tool_to_ready + 0.10):  # Move up past the original ready position to avoid collision with pen storage
+            return False
+        # Rotate back to original orientation after attaching the pen to be ready for drawing  
+        if not self.rotate_end_effector(-600, degrees=True):
+            return False
+        return self.go_home()  # After attaching, move back to home.
+        
 #---------------------------------------------7. Cartesian Utility Motion-------------------------------
+    def unwrap_wrist_trajectory_to_current_state(self, joint_trajectory):
+        if joint_trajectory is None or not joint_trajectory.points:
+            return joint_trajectory
+
+        joint_name = "wrist_3_joint"
+        if joint_name not in joint_trajectory.joint_names:
+            return joint_trajectory
+
+        current_positions = self.get_current_joint_positions()
+        current_wrist = current_positions[ur.joint_names().index(joint_name)]
+        wrist_index = joint_trajectory.joint_names.index(joint_name)
+        first_wrist = joint_trajectory.points[0].positions[wrist_index]
+        two_pi = 2.0 * np.pi
+        offset = round((current_wrist - first_wrist) / two_pi) * two_pi
+
+        if abs(offset) < 1e-6:
+            return joint_trajectory
+
+        self.get_logger().info(
+            f"Unwrapping {joint_name} trajectory by {offset:.6f} rad to match current joint state"
+        )
+
+        for point in joint_trajectory.points:
+            positions = list(point.positions)
+            positions[wrist_index] += offset
+            point.positions = positions
+
+        return joint_trajectory
+
     def move_vertical(self, dist):
         transform = self.tf_buffer.lookup_transform(
             "base_link",
@@ -1050,11 +1113,16 @@ class MotionNode(Node):
             f"Moving {direction} by {abs(float(dist)):.3f} m to z={target_position[2]:.3f}"
         )
 
-        self.moveit2.move_to_pose(
+        if not self.wait_for_fresh_joint_state():
+            self.get_logger().warn("Planning vertical motion without a fresh joint state")
+
+        joint_trajectory = self.moveit2.plan(
             position=target_position,
             quat_xyzw=target_quat,
             cartesian=True
         )
+        joint_trajectory = self.unwrap_wrist_trajectory_to_current_state(joint_trajectory)
+        self.moveit2.execute(joint_trajectory)
 
         if not self.wait_for_motion():
             if self.stop_was_requested():
