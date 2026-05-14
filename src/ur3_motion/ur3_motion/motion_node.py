@@ -986,8 +986,13 @@ class MotionNode(Node):
         ready_position, ready_quat = self.get_pen_ready_pose(pen_index)
         # Go home first to ensure a consistent starting pose for MoveIt planning to the pen ready pose
         self.go_home()
+        self.moveit2.move_to_configuration([0.8832625150680542,-1.5883520285235804, 1.588944911956787, -1.5696714560138147, -1.5702937285052698, -0.6869242827044886])
+        if not self.wait_for_motion():
+            if self.stop_was_requested():
+                return False
+            raise RuntimeError("MoveIt planned the pen approach motion, but execution did not complete")
         # Move to ready pose above the pen + extra distance to ensure pentip not gonna collide with top of pen storage 
-        new_ready_position = ready_position + np.array([0.0, 0.0, 0.20])  # Add 20 cm in z to be safely above
+        new_ready_position = ready_position + np.array([0.0, 0.0, 0.17])  # Add 17 cm in z to be safely above
         self.moveit2.move_to_pose(
             position=new_ready_position.tolist(),
             quat_xyzw=ready_quat.tolist(),
@@ -1001,14 +1006,14 @@ class MotionNode(Node):
         dist_tool_to_ready = new_ready_position[2] - ready_position[2]
         self.move_vertical(-dist_tool_to_ready)
         # Rotate in the opposite direction to unlock and drop the pen
-        if not self.rotate_end_effector(-300.0, degrees=True):
+        if not self.rotate_end_effector(-360.0, degrees=True):
             return False
-        if not self.rotate_end_effector(-300.0, degrees=True):
+        if not self.rotate_end_effector(-360.0, degrees=True):
             return False    
         # Go back up after dropping the pen
         if not self.move_vertical(dist_tool_to_ready):  # Move up past the original ready position to avoid collision with pen storage
             return False
-        if not self.rotate_end_effector(600, degrees=True):  # Rotate back to original orientation after detaching the pen
+        if not self.rotate_end_effector(720.0, degrees=True):  # Rotate back to original orientation after detaching the pen
             return False    
         # After detaching, move back to home.
         return self.go_home()
@@ -1017,41 +1022,38 @@ class MotionNode(Node):
         #Get Ready Pose from JSON
         ready_position, ready_quat = self.get_pen_ready_pose(pen_index)
         # Go home first to ensure a consistent starting pose for MoveIt planning to the pen ready pose
-        self.go_home()
+        if not self.go_home():
+            return False
+        self.moveit2.move_to_configuration([0.8832625150680542,-1.5883520285235804, 1.588944911956787, -1.5696714560138147, -1.5702937285052698, -0.6869242827044886])
+        if not self.wait_for_motion():
+            if self.stop_was_requested():
+                return False
+            raise RuntimeError("MoveIt planned the pen approach motion, but execution did not complete")
         new_ready_position = ready_position + np.array([0.0, 0.0, 0.08])  # Add 8 cm in z to be safely above    
-        #Move to ready pose above the pen
+        # Move to the calibrated pen-dock orientation above the pen.
         self.moveit2.move_to_pose(
             position=new_ready_position.tolist(),
-            quat_xyzw=ready_quat.tolist(),  # Use fixed orientation for better reliability in attaching the pen, since the wrist rotation will be handled by URScript separately from MoveIt
+            quat_xyzw=ready_quat.tolist(),
             cartesian=True
         )
         if not self.wait_for_motion():
             if self.stop_was_requested():
                 return False
-            raise RuntimeError("MoveIt planned the wrist rotation, but execution did not complete")
-        #rotate to fix orientation for vertical approach to grasp the pen, since the wrist rotation will be handled by URScript separately from MoveIt
-        self.moveit2.move_to_pose(
-            position=new_ready_position.tolist(),
-            quat_xyzw=self.fixed_orientation,  # Override orientation to fixed for the vertical approach to grasp the pen, since the wrist rotation will be handled by URScript separately from MoveIt  
-            cartesian=True
-        )
-        if not self.wait_for_motion():
-            if self.stop_was_requested():
-                return False
-            raise RuntimeError("MoveIt planned the wrist rotation, but execution did not complete")
+            raise RuntimeError("MoveIt planned the pen approach motion, but execution did not complete")
         #The ready to attach position is above the pen. Move down to grasp it.
         dist_tool_to_ready = new_ready_position[2] - ready_position[2]
-        self.move_vertical(-dist_tool_to_ready)
-        # Twist while in contact to secure the pen, then lift up with the pen
-        if not self.rotate_end_effector(300.0, degrees=True):
+        if not self.move_vertical(-dist_tool_to_ready):
             return False
-        if not self.rotate_end_effector(300.0, degrees=True):
+        # Twist while in contact to secure the pen, then lift up with the pen
+        if not self.rotate_end_effector(360.0, degrees=True):
+            return False
+        if not self.rotate_end_effector(360.0, degrees=True):
             return False
         # Lift up 10 cm with the pen
         if not self.move_vertical(dist_tool_to_ready + 0.10):  # Move up past the original ready position to avoid collision with pen storage
             return False
         # Rotate back to original orientation after attaching the pen to be ready for drawing  
-        if not self.rotate_end_effector(-600, degrees=True):
+        if not self.rotate_end_effector(-720, degrees=True):
             return False
         return self.go_home()  # After attaching, move back to home.
         
