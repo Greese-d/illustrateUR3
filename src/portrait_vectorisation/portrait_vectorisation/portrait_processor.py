@@ -26,7 +26,7 @@ class PortraitProcessor:
         line_thickness: int = 4,
         sort_strokes: bool = True,
         min_stroke_length: float = 20.0,
-        signature_scale: float = 0.30,
+        signature_scale: float = 0.40,
     ):
         """
         Parameters

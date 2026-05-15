@@ -1,65 +1,102 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 420" width="1400" height="420" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" width="2800" height="420" viewBox="0 0 2200 420" fill="none">
 
-  <g stroke="black" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+  <g stroke="black" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
 
-    <!-- Minimal UR-style robot arm -->
-    <circle cx="120" cy="250" r="18" fill="black" stroke="none"/>
-    <path d="M120 250 L190 185"/>
+    <!-- ================= -->
+    <!-- Simplified UR Arm -->
+    <!-- ================= -->
 
-    <circle cx="190" cy="185" r="14" fill="black" stroke="none"/>
-    <path d="M190 185 L270 155"/>
+    <circle cx="120" cy="250" r="30" fill="black" stroke="none"></circle>
+    <path d="M120 250 L200 185"></path>
 
-    <circle cx="270" cy="155" r="12" fill="black" stroke="none"/>
-    <path d="M120 250 L85 325"/>
+    <circle cx="200" cy="185" r="30" fill="black" stroke="none"></circle>
+    <path d="M200 185 L290 150"></path>
 
-    <!-- Pen tip -->
-    <path d="M85 325 L72 350"/>
+    <circle cx="290" cy="150" r="30" fill="black" stroke="none"></circle>
 
-    <!-- Signature underline -->
-    <path d="M90 335 C300 270, 650 250, 980 305"/>
+    <path d="M120 250 L185 330"></path>
 
-    <!-- Illustrate lettering -->
+    <!-- Pen -->
+    <path d="M185 330 L215 355"></path>
+    <path d="M215 355 L195 315"></path>
+
+    <!-- Underline -->
+    <path d="M380 320 L2450 320"></path>
+
+    <!-- ================= -->
+    <!-- ILLUSTRATEUR3 -->
+    <!-- Evenly spaced -->
+    <!-- ================= -->
 
     <!-- I -->
-    <path d="M360 145 L345 265"/>
+    <path d="M420 150 L420 280"></path>
 
-    <!-- l -->
-    <path d="M405 135 L390 265"/>
+    <!-- L -->
+    <path d="M520 150 L520 280 L590 280"></path>
 
-    <!-- l -->
-    <path d="M455 135 L440 265"/>
+    <!-- L -->
+    <path d="M660 150 L660 280 L730 280"></path>
 
-    <!-- u -->
-    <path d="M495 185 C495 255, 555 255, 565 185"/>
+    <!-- U -->
+    <path d="M820 150 L820 245
+             Q820 285 860 285
+             Q900 285 900 245
+             L900 150"></path>
 
-    <!-- s -->
-    <path d="M640 185 C595 160, 585 220, 640 220 C690 220, 680 280, 625 260"/>
+    <!-- S -->
+    <path d="M1070 170
+             Q1035 145 1000 160
+             Q965 185 1000 210
+             L1040 225
+             Q1080 245 1050 275
+             Q1015 300 980 270"></path>
 
-    <!-- t -->
-    <path d="M735 145 L715 275"/>
-    <path d="M685 185 L760 185"/>
+    <!-- T -->
+    <path d="M1110 150 L1220 150"></path>
+    <path d="M1165 150 L1165 280"></path>
 
-    <!-- r -->
-    <path d="M790 265 L805 185 C820 165, 850 165, 865 185"/>
+    <!-- R -->
+    <path d="M1290 280 L1290 150"></path>
+    <path d="M1290 150 L1360 150
+             Q1400 150 1400 195
+             Q1400 235 1360 235
+             L1290 235"></path>
+    <path d="M1350 235 L1415 280"></path>
 
-    <!-- a -->
-    <path d="M955 225 C955 175, 890 175, 890 225 C890 275, 955 275, 955 225 Z"/>
-    <path d="M955 185 L955 265"/>
+    <!-- A -->
+    <path d="M1490 280 L1540 150 L1590 280"></path>
+    <path d="M1510 235 L1570 235"></path>
 
-    <!-- t -->
-    <path d="M1035 145 L1015 275"/>
-    <path d="M985 185 L1060 185"/>
+    <!-- T -->
+    <path d="M1660 150 L1770 150"></path>
+    <path d="M1715 150 L1715 280"></path>
 
-    <!-- e -->
-    <path d="M1135 215 C1120 175, 1065 180, 1060 225 C1055 275, 1125 285, 1145 245"/>
-    <path d="M1070 225 L1130 225"/>
+    <!-- E -->
+    <path d="M1840 150 L1840 280"></path>
+    <path d="M1840 150 L1920 150"></path>
+    <path d="M1840 215 L1910 215"></path>
+    <path d="M1840 280 L1920 280"></path>
 
-    <!-- UR3 -->
-    <path d="M1180 150 L1180 245 C1180 290, 1235 290, 1235 245 L1235 150"/>
+    <!-- U -->
+    <path d="M2000 150 L2000 245
+             Q2000 285 2040 285
+             Q2080 285 2080 245
+             L2080 150"></path>
 
-    <path d="M1280 290 L1280 150 L1340 150 C1375 150, 1385 225, 1340 225 L1280 225"/>
-    <path d="M1335 225 L1390 290"/>
+    <!-- R -->
+    <path d="M2160 280 L2160 150"></path>
+    <path d="M2160 150 L2230 150
+             Q2270 150 2270 195
+             Q2270 235 2230 235
+             L2160 235"></path>
+    <path d="M2220 235 L2285 280"></path>
+
+    <!-- 3 -->
+    <path d="M2360 175
+             Q2410 145 2440 175
+             Q2460 200 2425 225
+             Q2470 250 2440 285
+             Q2405 315 2350 280"></path>
 
   </g>
-
 </svg>

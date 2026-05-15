@@ -810,16 +810,24 @@ class GuiApp:
             "PEACE": "hat",         # mask 2
             "THREE": "glasses",     # mask 3
             "FOUR": "nose",         # mask 4
+            "FIST": "none",         # remove mask / normal camera
         }
 
         if gesture_name in mask_gesture_map:
             self.last_gesture_time = now
 
             mask_type = mask_gesture_map[gesture_name]
-            self.status_text.config(
-                text=f"{gesture_name} detected. Applying {mask_type} mask..."
-            )
-            self.add_log(f"Gesture detected: {gesture_name} -> mask: {mask_type}")
+
+            if mask_type == "none":
+                self.status_text.config(
+                    text=f"{gesture_name} detected. Removing mask..."
+                )
+                self.add_log(f"Gesture detected: {gesture_name} -> removing mask")
+            else:
+                self.status_text.config(
+                    text=f"{gesture_name} detected. Applying {mask_type} mask..."
+                )
+                self.add_log(f"Gesture detected: {gesture_name} -> mask: {mask_type}")
 
             self.ros_node.set_mask_type(mask_type, self.on_mask_response)
             return
