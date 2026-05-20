@@ -7,14 +7,209 @@ import rclpy
 import cv2
 import time
 
+class RoundedButton(tk.Canvas):
+    def __init__(
+        self,
+        parent,
+        text,
+        command=None,
+        bg="#3b1648",
+        hover_bg="#5b216b",
+        fg="#ffffff",
+        disabled_bg="#2a1230",
+        disabled_fg="#64748b",
+        radius=14,
+        padding_x=18,
+        padding_y=10,
+        font=("Arial", 11, "bold"),
+        **kwargs
+    ):
+        super().__init__(
+            parent,
+            highlightthickness=0,
+            bd=0,
+            bg=parent.cget("bg"),
+            **kwargs
+        )
+
+        self.command = command
+        self.normal_bg = bg
+        self.hover_bg = hover_bg
+        self.disabled_bg = disabled_bg
+        self.fg = fg
+        self.disabled_fg = disabled_fg
+        self.radius = radius
+        self.text = text
+        self.font = font
+        self.state = "normal"
+
+        self.padding_x = padding_x
+        self.padding_y = padding_y
+
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<Button-1>", self._on_click)
+        self.bind("<Configure>", lambda event: self.draw())
+
+        self.draw()
+
+    def rounded_rect(self, x1, y1, x2, y2, r, **kwargs):
+        points = [
+            x1+r, y1,
+            x2-r, y1,
+            x2, y1,
+            x2, y1+r,
+            x2, y2-r,
+            x2, y2,
+            x2-r, y2,
+            x1+r, y2,
+            x1, y2,
+            x1, y2-r,
+            x1, y1+r,
+            x1, y1,
+        ]
+        return self.create_polygon(points, smooth=True, **kwargs)
+
+    def draw(self):
+        self.delete("all")
+
+        w = max(self.winfo_width(), 120)
+        h = max(self.winfo_height(), 36)
+
+        fill = self.disabled_bg if self.state == "disabled" else self.normal_bg
+        text_fill = self.disabled_fg if self.state == "disabled" else self.fg
+
+        self.rounded_rect(
+            2,
+            2,
+            w - 2,
+            h - 2,
+            self.radius,
+            fill=fill,
+            outline="",
+        )
+
+        self.create_text(
+            w / 2,
+            h / 2,
+            text=self.text,
+            fill=text_fill,
+            font=self.font,
+        )
+
+    def _on_enter(self, event):
+        if self.state != "disabled":
+            self.normal_bg, self.hover_bg = self.hover_bg, self.normal_bg
+            self.draw()
+
+    def _on_leave(self, event):
+        if self.state != "disabled":
+            self.normal_bg, self.hover_bg = self.hover_bg, self.normal_bg
+            self.draw()
+
+    def _on_click(self, event):
+        if self.state != "disabled" and self.command:
+            self.command()
+
+    def config(self, **kwargs):
+        if "state" in kwargs:
+            self.state = kwargs.pop("state")
+
+        if "text" in kwargs:
+            self.text = kwargs.pop("text")
+
+        if "bg" in kwargs:
+            self.normal_bg = kwargs.pop("bg")
+
+        if "fg" in kwargs:
+            self.fg = kwargs.pop("fg")
+
+        if "activebackground" in kwargs:
+            self.hover_bg = kwargs.pop("activebackground")
+
+        if "activeforeground" in kwargs:
+            kwargs.pop("activeforeground")
+
+        super().config(**kwargs)
+        self.draw()
+
+    configure = config
+
 class GuiApp:
     def __init__(self, root, ros_node):
         self.root = root
         self.ros_node = ros_node
 
+        self.theme_index = 1
+        self.theme_names = [
+            "Light Lab",
+            "Neon Pink",
+            "Cream Paper",
+        ]
+
+        self.theme_palettes = [
+            {
+                "bg": "#e5e7eb",
+                "panel": "#f9fafb",
+                "panel_2": "#eef2f7",
+                "border": "#e5e7eb",
+                "camera_bg": "#d1d5db",
+                "text": "#111827",
+                "muted": "#4b5563",
+                "accent": "#2563eb",
+                "accent_dark": "#1d4ed8",
+                "button": "#e5e7eb",
+                "button_hover": "#d1d5db",
+                "danger": "#dc2626",
+                "danger_hover": "#b91c1c",
+                "log_bg": "#ffffff",
+                "border_soft": "#94a3b8",
+                "disabled": "#e5e7eb",
+            },
+            {
+                "bg": "#120015",
+                "panel": "#1f0a26",
+                "panel_2": "#2a0f33",
+                "border": "#120015",
+                "camera_bg": "#08000a",
+                "text": "#fff4fb",
+                "muted": "#f0b8dc",
+                "accent": "#ff2bd6",
+                "accent_dark": "#c026d3",
+                "button": "#3b1648",
+                "button_hover": "#5b216b",
+                "danger": "#ff1744",
+                "danger_hover": "#c51135",
+                "log_bg": "#16001c",
+                "border_soft": "#ff5eea",
+                "disabled": "#2a1230",
+            },
+            {
+                "bg": "#f6f1e7",
+                "panel": "#fffdf7",
+                "panel_2": "#eee7d8",
+                "border": "#f6f1e7",
+                "camera_bg": "#eee7d8",
+                "text": "#292524",
+                "muted": "#57534e",
+                "accent": "#d97706",
+                "accent_dark": "#b45309",
+                "button": "#e7dfd0",
+                "button_hover": "#d6caba",
+                "danger": "#c2410c",
+                "danger_hover": "#9a3412",
+                "log_bg": "#fffaf0",
+                "border_soft": "#c8bba7",
+                "disabled": "#e9e1d6",
+            },
+        ]
+
+        self.colors = self.theme_palettes[self.theme_index].copy()
+
         self.root.title("illustrateUR3 GUI")
         self.root.geometry("1200x750")
         self.root.minsize(1000, 650)
+        self.root.configure(bg=self.colors["bg"])
 
         self.camera_tk_image = None
         self.preview_tk_image = None
@@ -46,7 +241,6 @@ class GuiApp:
         self.ros_node.state_callback_fn = self.on_state_update
         self.ros_node.camera_callback_fn = self.on_camera_frame
         self.ros_node.preview_callback_fn = self.on_preview_frame
-        self.ros_node.live_drawing_callback_fn = self.on_live_drawing_frame
         self.ros_node.calibration_status_callback_fn = self.on_calibration_status
         self.ros_node.gesture_callback_fn = self.on_gesture_detected
 
@@ -61,15 +255,136 @@ class GuiApp:
         style = ttk.Style()
         style.theme_use("clam")
 
-        style.configure("Title.TLabel", font=("Arial", 20, "bold"))
-        style.configure("Heading.TLabel", font=("Arial", 12, "bold"))
-        style.configure("Status.TLabel", font=("Arial", 11))
-        style.configure("Panel.TLabelframe", padding=10)
-        style.configure("Panel.TLabelframe.Label", font=("Arial", 11, "bold"))
-        style.configure("Big.TButton", font=("Arial", 11), padding=8)
-        style.configure("TabSwitch.TButton", font=("Arial", 10, "bold"), padding=6)
+        c = self.colors
 
-        # Hide notebook tabs; we'll use our own buttons instead
+        style.configure(
+            ".",
+            background=c["bg"],
+            foreground=c["text"],
+            fieldbackground=c["panel"],
+            bordercolor=c["panel_2"],
+            lightcolor=c["panel_2"],
+            darkcolor=c["panel"],
+        )
+
+        style.configure(
+            "TFrame",
+            background=c["bg"],
+        )
+
+        style.configure(
+            "Title.TLabel",
+            font=("Arial", 20, "bold"),
+            background=c["bg"],
+            foreground=c["text"],
+        )
+
+        style.configure(
+            "Heading.TLabel",
+            font=("Arial", 12, "bold"),
+            background=c["bg"],
+            foreground=c["text"],
+        )
+
+        style.configure(
+            "Status.TLabel",
+            font=("Arial", 11),
+            background=c["panel"],
+            foreground=c["text"],
+        )
+
+        style.configure(
+            "Panel.TLabelframe",
+            background=c["panel"],
+            foreground=c["text"],
+            bordercolor=c["border"],
+            lightcolor=c["border"],
+            darkcolor=c["border"],
+            padding=10,
+        )
+
+        style.configure(
+            "Panel.TLabelframe.Label",
+            font=("Arial", 11, "bold"),
+            background=c["bg"],
+            foreground=c["accent"],
+        )
+
+        style.configure(
+            "Big.TButton",
+            font=("Arial", 11, "bold"),
+            padding=(12, 9),
+            background=c["button"],
+            foreground=c["text"],
+            bordercolor=c["button"],
+            lightcolor=c["button"],
+            darkcolor=c["button"],
+            focuscolor=c["button"],
+            focusthickness=0,
+            relief="flat",
+            borderwidth=0,
+        )
+
+        style.map(
+            "Big.TButton",
+            background=[
+                ("active", c["button_hover"]),
+                ("pressed", c["accent_dark"]),
+                ("disabled", c["disabled"]),
+            ],
+            foreground=[
+                ("disabled", "#64748b"),
+            ],
+            bordercolor=[
+                ("active", c["accent"]),
+                ("disabled", c["border"]),
+            ],
+        )
+
+        style.configure(
+            "TabSwitch.TButton",
+            font=("Arial", 10, "bold"),
+            padding=(12, 7),
+            background=c["button"],
+            foreground=c["text"],
+            bordercolor=c["button"],
+            lightcolor=c["button"],
+            darkcolor=c["button"],
+            focuscolor=c["button"],
+            focusthickness=0,
+            relief="flat",
+            borderwidth=0,
+        )
+
+        style.map(
+            "TabSwitch.TButton",
+            background=[
+                ("active", c["accent_dark"]),
+                ("pressed", c["accent_dark"]),
+                ("disabled", c["disabled"]),
+            ],
+            foreground=[
+                ("active", c["text"]),
+                ("disabled", "#64748b"),
+            ],
+            bordercolor=[
+                ("active", c["accent"]),
+                ("disabled", c["border"]),
+            ],
+        )
+
+        style.configure(
+            "TNotebook",
+            background=c["panel"],
+            borderwidth=0,
+        )
+
+        style.configure(
+            "TNotebook.Tab",
+            background=c["panel"],
+            foreground=c["text"],
+        )
+
         style.layout("TNotebook.Tab", [])
 
     def build_layout(self):
@@ -80,7 +395,7 @@ class GuiApp:
         # =========================
         # Top Bar
         # =========================
-        top_frame = ttk.Frame(self.root, padding=12)
+        top_frame = ttk.Frame(self.root, padding=12, style="TFrame")
         top_frame.grid(row=0, column=0, sticky="ew")
         top_frame.columnconfigure(0, weight=1)
         top_frame.columnconfigure(1, weight=0)
@@ -111,7 +426,7 @@ class GuiApp:
         # =========================
         # Main Content Area
         # =========================
-        self.content_frame = ttk.Frame(self.root, padding=(12, 0, 12, 12))
+        self.content_frame = ttk.Frame(self.root, padding=(12, 0, 12, 12), style="TFrame")
         self.content_frame.grid(row=1, column=0, sticky="nsew")
         self.content_frame.columnconfigure(0, weight=2, minsize=520)
         self.content_frame.columnconfigure(1, weight=3, minsize=650)
@@ -120,46 +435,79 @@ class GuiApp:
         # -------------------------
         # Camera Panel
         # -------------------------
-        self.camera_frame = ttk.LabelFrame(
+        self.camera_frame = tk.Frame(
             self.content_frame,
-            text="Live Camera",
-            style="Panel.TLabelframe"
+            bg=self.colors["panel"],
+            highlightthickness=1,
+            highlightbackground=self.colors["bg"],
+            highlightcolor=self.colors["bg"],
         )
         self.camera_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         self.camera_frame.columnconfigure(0, weight=1)
-        self.camera_frame.rowconfigure(0, weight=1)
+        self.camera_frame.rowconfigure(1, weight=1)
+
+        self.camera_title = tk.Label(
+            self.camera_frame,
+            text="Live Camera",
+            bg=self.colors["bg"],
+            fg=self.colors["accent"],
+            font=("Arial", 11, "bold"),
+            anchor="w",
+        )
+        self.camera_title.grid(row=0, column=0, sticky="ew", padx=0, pady=(0, 6))
 
         self.camera_placeholder = tk.Label(
             self.camera_frame,
             text="Camera feed will appear here",
-            bg="#2b2b2b",
-            fg="white",
+            bg=self.colors["camera_bg"],
+            fg=self.colors["text"],
             font=("Arial", 14),
-            relief="ridge",
-            bd=2
+            relief="flat",
+            bd=0,
+            padx=4,
+            pady=4,
+            highlightthickness=2,
+            highlightbackground=self.colors["border_soft"],
+            highlightcolor=self.colors["accent"],
         )
-        self.camera_placeholder.grid(row=0, column=0, sticky="nsew")
+        self.camera_placeholder.grid(row=1, column=0, sticky="nsew")
 
         # -------------------------
         # Right Panel
         # -------------------------
-        self.preview_frame = ttk.LabelFrame(
+        self.preview_frame = tk.Frame(
             self.content_frame,
-            text="Output",
-            style="Panel.TLabelframe"
+            bg=self.colors["panel"],
+            highlightthickness=1,
+            highlightbackground=self.colors["bg"],
+            highlightcolor=self.colors["bg"],
         )
         self.preview_frame.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
         self.preview_frame.columnconfigure(0, weight=1)
-        self.preview_frame.rowconfigure(1, weight=1)
+        self.preview_frame.rowconfigure(2, weight=1)
+
+        self.preview_title = tk.Label(
+            self.preview_frame,
+            text="Output",
+            bg=self.colors["bg"],
+            fg=self.colors["accent"],
+            font=("Arial", 11, "bold"),
+            anchor="w",
+        )
+        self.preview_title.grid(row=0, column=0, sticky="ew", padx=0, pady=(0, 6))
 
        # Custom header buttons
-        self.preview_header = ttk.Frame(self.preview_frame)
-        self.preview_header.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        self.preview_header = tk.Frame(
+            self.preview_frame,
+            bg=self.colors["panel"],
+            highlightthickness=0,
+            bd=0,
+        )
+        self.preview_header.grid(row=1, column=0, sticky="ew", pady=(0, 6))
         self.preview_header.columnconfigure(0, weight=0)
         self.preview_header.columnconfigure(1, weight=0)
         self.preview_header.columnconfigure(2, weight=0)
-        self.preview_header.columnconfigure(3, weight=0)
-        self.preview_header.columnconfigure(4, weight=1)
+        self.preview_header.columnconfigure(3, weight=1)
 
         self.preview_button = ttk.Button(
             self.preview_header,
@@ -177,24 +525,16 @@ class GuiApp:
         )
         self.calibration_button.grid(row=0, column=1, sticky="w")
 
-        self.live_drawing_button = ttk.Button(
-            self.preview_header,
-            text="Live-Drawing",
-            style="TabSwitch.TButton",
-            command=self.open_live_drawing_tab
-        )
-        self.live_drawing_button.grid(row=0, column=2, padx=(6, 0), sticky="w")
-
         self.settings_button = ttk.Button(
             self.preview_header,
             text="Settings",
             style="TabSwitch.TButton",
             command=self.open_settings_tab
         )
-        self.settings_button.grid(row=0, column=3, padx=(6, 0), sticky="w")
+        self.settings_button.grid(row=0, column=2, padx=(6, 0), sticky="w")
 
         self.preview_notebook = ttk.Notebook(self.preview_frame)
-        self.preview_notebook.grid(row=1, column=0, sticky="nsew")
+        self.preview_notebook.grid(row=2, column=0, sticky="nsew")
 
         # Preview page
         self.preview_tab = ttk.Frame(self.preview_notebook)
@@ -204,11 +544,16 @@ class GuiApp:
         self.preview_placeholder = tk.Label(
             self.preview_tab,
             text="Processed portrait preview will appear here",
-            bg="#2b2b2b",
-            fg="white",
+            bg=self.colors["camera_bg"],
+            fg=self.colors["muted"],
             font=("Arial", 14),
-            relief="ridge",
-            bd=2
+            relief="flat",
+            bd=0,
+            padx=4,
+            pady=4,
+            highlightthickness=2,
+            highlightbackground=self.colors["border_soft"],
+            highlightcolor=self.colors["accent"],
         )
         self.preview_placeholder.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
 
@@ -231,24 +576,6 @@ class GuiApp:
             style="Heading.TLabel"
         )
         self.calibration_title.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
-
-        # Live-Drawing page
-        self.live_drawing_tab = ttk.Frame(self.preview_notebook)
-        self.live_drawing_tab.columnconfigure(0, weight=1)
-        self.live_drawing_tab.rowconfigure(0, weight=1)
-
-        self.live_drawing_placeholder = tk.Label(
-            self.live_drawing_tab,
-            text="Live drawing will appear here in real time",
-            bg="#2b2b2b",
-            fg="white",
-            font=("Arial", 14),
-            relief="ridge",
-            bd=2
-        )
-        self.live_drawing_placeholder.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
-
-        self.preview_notebook.add(self.live_drawing_tab, text="Live-Drawing")
 
         self.point1_button = ttk.Button(
             self.calibration_tab,
@@ -455,92 +782,134 @@ class GuiApp:
         # =========================
         # Bottom Area
         # =========================
-        bottom_frame = ttk.Frame(self.root, padding=(12, 0, 12, 12))
+        bottom_frame = ttk.Frame(self.root, padding=(12, 0, 12, 12), style="TFrame")
         bottom_frame.grid(row=2, column=0, sticky="ew")
         bottom_frame.columnconfigure(0, weight=1)
         bottom_frame.columnconfigure(1, weight=1)
 
         # Controls Panel
-        controls_frame = ttk.LabelFrame(
+        self.controls_frame = tk.Frame(
             bottom_frame,
+            bg=self.colors["panel"],
+            highlightthickness=1,
+            highlightbackground=self.colors["bg"],
+            highlightcolor=self.colors["bg"],
+        )
+        self.controls_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        self.controls_frame.columnconfigure(0, weight=1)
+        self.controls_frame.columnconfigure(1, weight=1)
+
+        self.controls_title = tk.Label(
+            self.controls_frame,
             text="Controls",
-            style="Panel.TLabelframe"
+            bg=self.colors["bg"],
+            fg=self.colors["accent"],
+            font=("Arial", 11, "bold"),
+            anchor="w",
         )
-        controls_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        controls_frame.columnconfigure(0, weight=1)
-        controls_frame.columnconfigure(1, weight=1)
+        self.controls_title.grid(row=0, column=0, columnspan=2, sticky="ew", padx=0, pady=(0, 8))
 
-        self.capture_button = ttk.Button(
-            controls_frame,
+        self.capture_button = RoundedButton(
+            self.controls_frame,
             text="Capture Portrait",
-            style="Big.TButton",
-            command=self.on_capture
+            command=self.on_capture,
+            bg=self.colors["button"],
+            hover_bg=self.colors["button_hover"],
+            fg=self.colors["text"],
+            disabled_bg=self.colors["disabled"],
+            height=45,
         )
-        self.capture_button.grid(row=0, column=0, padx=6, pady=6, sticky="ew")
+        self.capture_button.grid(row=1, column=0, padx=6, pady=6, sticky="ew")
 
-        self.start_button = ttk.Button(
-            controls_frame,
+        self.start_button = RoundedButton(
+            self.controls_frame,
             text="Start Drawing",
-            style="Big.TButton",
-            command=self.on_start
+            command=self.on_start,
+            bg=self.colors["button"],
+            hover_bg=self.colors["button_hover"],
+            fg=self.colors["text"],
+            disabled_bg=self.colors["disabled"],
+            height=45,
         )
-        self.start_button.grid(row=0, column=1, padx=6, pady=6, sticky="ew")
+        self.start_button.grid(row=1, column=1, padx=6, pady=6, sticky="ew")
 
-        self.stop_button = ttk.Button(
-            controls_frame,
+        self.stop_button = RoundedButton(
+            self.controls_frame,
             text="Stop Drawing",
-            style="Big.TButton",
-            command=self.on_stop
+            command=self.on_stop,
+            bg=self.colors["button"],
+            hover_bg=self.colors["button_hover"],
+            fg=self.colors["text"],
+            disabled_bg=self.colors["disabled"],
+            height=45,
         )
-        self.stop_button.grid(row=1, column=0, padx=6, pady=6, sticky="ew")
+        self.stop_button.grid(row=2, column=0, padx=6, pady=6, sticky="ew")
 
-        self.estop_button = tk.Button(
-            controls_frame,
+        self.estop_button = RoundedButton(
+            self.controls_frame,
             text="E-STOP",
-            font=("Arial", 12, "bold"),
-            bg="#cc3333",
+            command=self.on_estop,
+            bg=self.colors["danger"],
+            hover_bg=self.colors["danger_hover"],
             fg="white",
-            activebackground="#aa2222",
-            activeforeground="white",
-            command=self.on_estop
+            disabled_bg=self.colors["danger_hover"],
+            radius=14,
+            font=("Arial", 12, "bold"),
+            height=45,
         )
-        self.estop_button.grid(row=1, column=1, padx=6, pady=6, sticky="ew")
+        self.estop_button.grid(row=2, column=1, padx=6, pady=6, sticky="ew")
 
         self.start_button.config(state="disabled")
         self.stop_button.config(state="disabled")
 
         # Status Panel
-        status_frame = ttk.LabelFrame(
+        self.status_frame = tk.Frame(
             bottom_frame,
-            text="Status & Messages",
-            style="Panel.TLabelframe"
+            bg=self.colors["panel"],
+            highlightthickness=1,
+            highlightbackground=self.colors["bg"],
+            highlightcolor=self.colors["bg"],
         )
-        status_frame.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
-        status_frame.columnconfigure(0, weight=1)
+        self.status_frame.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        self.status_frame.columnconfigure(0, weight=1)
+
+        self.status_title = tk.Label(
+            self.status_frame,
+            text="Status & Messages",
+            bg=self.colors["bg"],
+            fg=self.colors["accent"],
+            font=("Arial", 11, "bold"),
+            anchor="w",
+        )
+        self.status_title.grid(row=0, column=0, sticky="ew", padx=0, pady=(0, 8))
 
         self.status_text = ttk.Label(
-            status_frame,
+            self.status_frame,
             text="Ready. Waiting for backend connections.",
             style="Status.TLabel"
         )
-        self.status_text.grid(row=0, column=0, sticky="w", padx=4, pady=(4, 8))
+        self.status_text.grid(row=1, column=0, sticky="w", padx=4, pady=(4, 8))
 
         self.progress_label = ttk.Label(
-            status_frame,
+            self.status_frame,
             text="Drawing Progress: 0%",
             style="Status.TLabel"
         )
-        self.progress_label.grid(row=1, column=0, sticky="w", padx=4, pady=4)
+        self.progress_label.grid(row=2, column=0, sticky="w", padx=4, pady=4)
 
         self.log_box = tk.Text(
-            status_frame,
+            self.status_frame,
             height=8,
             wrap="word",
             state="disabled",
-            bg="#f4f4f4",
-            font=("Arial", 10)
+            bg=self.colors["log_bg"],
+            fg=self.colors["muted"],
+            insertbackground=self.colors["text"],
+            font=("Consolas", 10),
+            relief="flat",
+            bd=0,
         )
-        self.log_box.grid(row=2, column=0, sticky="ew", padx=4, pady=(8, 4))
+        self.log_box.grid(row=3, column=0, sticky="ew", padx=4, pady=(8, 4))
 
         self.add_log("GUI started successfully.")
         self.add_log("Waiting for camera, preview, and robot status topics.")
@@ -586,6 +955,105 @@ class GuiApp:
         # Restore balanced windowed layout.
         self.content_frame.columnconfigure(0, weight=1, minsize=0)
         self.content_frame.columnconfigure(1, weight=1, minsize=0)
+
+    def hex_to_rgb(self, hex_color):
+        hex_color = hex_color.lstrip("#")
+        return (
+            int(hex_color[0:2], 16),
+            int(hex_color[2:4], 16),
+            int(hex_color[4:6], 16),
+        )
+
+    def cycle_theme(self, source="gesture"):
+        self.theme_index = (self.theme_index + 1) % len(self.theme_palettes)
+        self.colors = self.theme_palettes[self.theme_index].copy()
+
+        self.apply_theme()
+
+        theme_name = self.theme_names[self.theme_index]
+        self.status_text.config(text=f"Theme changed to {theme_name}.")
+        self.add_log(f"Theme changed to {theme_name} from {source}.")
+
+    def apply_theme(self):
+        c = self.colors
+
+        self.root.configure(bg=c["bg"])
+        self.setup_styles()
+
+        # Outer panel frames
+        for frame in (
+            self.camera_frame,
+            self.preview_frame,
+            self.controls_frame,
+            self.status_frame,
+        ):
+            frame.configure(
+                bg=c["panel"],
+                highlightbackground=c["bg"],
+                highlightcolor=c["bg"],
+            )
+
+        # Header strip above Preview / Calibration / Settings buttons
+        self.preview_header.configure(
+            bg=c["panel"],
+            highlightbackground=c["panel"],
+            highlightcolor=c["panel"],
+        )
+
+        # Panel titles
+        for title in (
+            self.camera_title,
+            self.preview_title,
+            self.controls_title,
+            self.status_title,
+        ):
+            title.configure(
+                bg=c["bg"],
+                fg=c["accent"],
+            )
+
+        # Image panels
+        self.camera_placeholder.configure(
+            bg=c["camera_bg"],
+            fg=c["text"],
+            highlightbackground=c["border_soft"],
+            highlightcolor=c["accent"],
+        )
+
+        self.preview_placeholder.configure(
+            bg=c["camera_bg"],
+            fg=c["muted"],
+            highlightbackground=c["border_soft"],
+            highlightcolor=c["accent"],
+        )
+
+        for button in (
+            self.capture_button,
+            self.start_button,
+            self.stop_button,
+        ):
+            button.configure(
+                bg=c["button"],
+                fg=c["text"],
+                activebackground=c["button_hover"],
+            )
+            button.disabled_bg = c["disabled"]
+            button.draw()
+
+        self.estop_button.configure(
+            bg=c["danger"],
+            fg="white",
+            activebackground=c["danger_hover"],
+        )
+        self.estop_button.disabled_bg = c["danger_hover"]
+        self.estop_button.draw()
+
+        # Log box
+        self.log_box.configure(
+            bg=c["log_bg"],
+            fg=c["muted"],
+             insertbackground=c["text"],
+        )
 
     def add_log(self, message):
         self.log_box.config(state="normal")
@@ -738,11 +1206,6 @@ class GuiApp:
         self.status_text.config(text="Preview view opened.")
         self.add_log("Switched to Preview view.")
 
-    def open_live_drawing_tab(self):
-        self.preview_notebook.select(self.live_drawing_tab)
-        self.status_text.config(text="Live-Drawing view opened.")
-        self.add_log("Switched to Live-Drawing view.")
-
     def open_settings_tab(self):
         self.preview_notebook.select(self.settings_tab)
         self.status_text.config(text="Settings view opened.")
@@ -803,6 +1266,11 @@ class GuiApp:
         now = time.time()
 
         if now - self.last_gesture_time < self.gesture_cooldown_sec:
+            return
+
+        if gesture_name == "CALL ME":
+            self.last_gesture_time = now
+            self.cycle_theme(source="gesture: CALL ME")
             return
 
         mask_gesture_map = {
@@ -918,7 +1386,7 @@ class GuiApp:
                 left=max(0, (label_w - new_w) // 2),
                 right=max(0, label_w - new_w - ((label_w - new_w) // 2)),
                 borderType=cv2.BORDER_CONSTANT,
-                value=(43, 43, 43),
+                value=self.hex_to_rgb(self.colors["camera_bg"]),
             ),
             cv2.COLOR_RGB2BGR
         )
@@ -935,8 +1403,6 @@ class GuiApp:
             self.camera_tk_image = tk_img
         elif which == "preview":
             self.preview_tk_image = tk_img
-        elif which == "live_drawing":
-            self.live_drawing_tk_image = tk_img
 
     def crop_preview_to_content(self, frame_bgr, padding=40):
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
@@ -1010,13 +1476,6 @@ class GuiApp:
     def on_preview_frame(self, frame_bgr):
         cropped = self.crop_preview_to_content(frame_bgr, padding=50)
         self.render_frame_to_label(cropped, self.preview_placeholder, "preview")
-
-    def on_live_drawing_frame(self, frame_bgr):
-        self.render_frame_to_label(
-            frame_bgr,
-            self.live_drawing_placeholder,
-            "live_drawing"
-        )
 
     def poll_ros(self):
         rclpy.spin_once(self.ros_node, timeout_sec=0.0)
