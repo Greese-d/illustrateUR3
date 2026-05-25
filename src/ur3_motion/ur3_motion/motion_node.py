@@ -39,6 +39,8 @@ class MotionNode(Node):
         )
         self.moveit2.max_velocity = 0.05
         self.moveit2.max_acceleration = 0.05
+        self.vertical_motion_max_velocity = 0.01
+        self.vertical_motion_max_acceleration = 0.01
         self.fixed_orientation = [0.0, 1.0, 0.0, 0.0]
         self.tcp_offset = 0.17 # length of the pen ( from end-effector to pentip when pen is interacting with paper, i.e. pointing downwards)
         self.wrist_rotation_speed = np.deg2rad(45.0)
@@ -71,6 +73,7 @@ class MotionNode(Node):
         # pencolor changing and pen docking parameters
         self.pen_calibration_data= "pen_storage_calibration.json"
         self.pen_ready_to_attach_pos = 0.1916 # this is the fixed distance from the bottom of the pen storage to ready position for rotate  and attach (lock the pen)
+        self.pen_detach_approach_quats = {}
         # Timer and flags for stroke reception
         self.inactivity_timer = None  # Timer to detect end of stroke messages
         self.strokes_reported = False  # Flag to report total strokes only once per batch
@@ -256,12 +259,11 @@ class MotionNode(Node):
             drawn_path.append(point)
             self.get_logger().info(f"Moving to point: {real_point}")
             # self.visualize_rectangle(drawn_path)
-            self.moveit2.move_to_pose(
-                position=real_point.tolist(),
-                quat_xyzw=quat,
-                cartesian=True
-            )
-            if not self.wait_for_motion() or self.stop_was_requested():
+            if not self.move_to_pose_unwrapped(
+                real_point.tolist(),
+                quat,
+                "rectangle drawing motion"
+            ) or self.stop_was_requested():
                 self.get_logger().info("Rectangle drawing stopped")
                 return False
             self.visualize_rectangle(drawn_path)
@@ -711,12 +713,11 @@ class MotionNode(Node):
         self.get_logger().info(f"Moving above first point in real world: ({start_up[0]}, {start_up[1]}, {start_up[2]})")
         # self.visualize_start_point(start_up)
         self.get_logger().info("Started point visualization")    
-        self.moveit2.move_to_pose(
-            position=start_up.tolist(),
-            quat_xyzw=quat,
-            cartesian=True
-        )
-        if not self.wait_for_motion() or self.stop_was_requested():
+        if not self.move_to_pose_unwrapped(
+            start_up.tolist(),
+            quat,
+            "stroke start lift motion"
+        ) or self.stop_was_requested():
             return msg
         self.get_logger().info("Reached above first point")
 
@@ -728,12 +729,11 @@ class MotionNode(Node):
         else:
             start_down = start_point + self.tcp_offset * z_axis
 
-        self.moveit2.move_to_pose(
-            position=start_down.tolist(),
-            quat_xyzw=quat,
-            cartesian=True,
-        )
-        if not self.wait_for_motion() or self.stop_was_requested():
+        if not self.move_to_pose_unwrapped(
+            start_down.tolist(),
+            quat,
+            "stroke pen-down motion"
+        ) or self.stop_was_requested():
             return msg
 
         # -----------------------------
@@ -754,12 +754,11 @@ class MotionNode(Node):
             else:
                 real_point = point + self.tcp_offset * z_axis
 
-            self.moveit2.move_to_pose(
-                position=real_point.tolist(),
-                quat_xyzw=quat,
-                cartesian=True
-            )
-            if not self.wait_for_motion() or self.stop_was_requested():
+            if not self.move_to_pose_unwrapped(
+                real_point.tolist(),
+                quat,
+                "stroke drawing motion"
+            ) or self.stop_was_requested():
                 return self.remaining_path_from(msg, pose_index)
             drawn_path.append(point)
             self.visualize_stroke_path(drawn_path)
@@ -775,29 +774,17 @@ class MotionNode(Node):
         else:
             end_up = last_point + (self.tcp_offset + lift_height) * z_axis
 
-        self.moveit2.move_to_pose(
-            position=end_up.tolist(),
-            quat_xyzw=quat,
-            cartesian=True
-        )
-        if not self.wait_for_motion() or self.stop_was_requested():
+        if not self.move_to_pose_unwrapped(
+            end_up.tolist(),
+            quat,
+            "stroke end lift motion"
+        ) or self.stop_was_requested():
             return Path()
         return None
 #---------------------------------------------5. Fundamental Functions (Home, Stop, Start, Resume)-------------------------------
-    def go_home(self):
-    #     self.moveit2.move_to_pose(
-    #     position=[0.298, 0.113, 0.312],
-    #     quat_xyzw=self.fixed_orientation,
-    #     cartesian=True
-    # )
-        home_configuration = [1.57, -1.57, 1.57, -1.57, -1.57, 0.0]
-
-        if not self.wait_for_fresh_joint_state():
-            self.get_logger().warn("Planning home motion without a fresh joint state")
-
-        joint_trajectory = self.moveit2.plan(joint_positions=home_configuration)
+    def execute_planned_motion(self, joint_trajectory, motion_name):
         if joint_trajectory is None:
-            raise RuntimeError("MoveIt could not plan the home motion")
+            raise RuntimeError(f"MoveIt could not plan the {motion_name}")
 
         joint_trajectory = self.unwrap_wrist_trajectory_to_current_state(joint_trajectory)
         self.moveit2.execute(joint_trajectory)
@@ -805,8 +792,36 @@ class MotionNode(Node):
         if not self.wait_for_motion():
             if self.stop_was_requested():
                 return False
-            raise RuntimeError("MoveIt planned the home motion, but execution did not complete")
-        return True
+            raise RuntimeError(f"MoveIt planned the {motion_name}, but execution did not complete")
+
+        return not self.stop_was_requested()
+
+    def move_to_joint_configuration(self, joint_positions, motion_name):
+        if not self.wait_for_fresh_joint_state():
+            self.get_logger().warn(f"Planning {motion_name} without a fresh joint state")
+
+        joint_trajectory = self.moveit2.plan(joint_positions=joint_positions)
+        return self.execute_planned_motion(joint_trajectory, motion_name)
+
+    def move_to_pose_unwrapped(self, position, quat_xyzw, motion_name, cartesian=True):
+        if not self.wait_for_fresh_joint_state():
+            self.get_logger().warn(f"Planning {motion_name} without a fresh joint state")
+
+        joint_trajectory = self.moveit2.plan(
+            position=position,
+            quat_xyzw=quat_xyzw,
+            cartesian=cartesian
+        )
+        return self.execute_planned_motion(joint_trajectory, motion_name)
+
+    def go_home(self):
+    #     self.moveit2.move_to_pose(
+    #     position=[0.298, 0.113, 0.312],
+    #     quat_xyzw=self.fixed_orientation,
+    #     cartesian=True
+    # )
+        home_configuration = [1.57, -1.57, 1.57, -1.57, -1.57, 0.0]
+        return self.move_to_joint_configuration(home_configuration, "home motion")
 
     def handle_go_home(self, request, response):
         if self.is_drawing or self.drawing_requested or self.go_home_requested:
@@ -984,37 +999,32 @@ class MotionNode(Node):
     def detach_pen(self, pen_index):
         # Get Ready Pose from JSON
         ready_position, ready_quat = self.get_pen_ready_pose(pen_index)
+        detach_approach_quat = self.pen_detach_approach_quats.get(int(pen_index), ready_quat)
         # Go home first to ensure a consistent starting pose for MoveIt planning to the pen ready pose
-        self.go_home()
-        self.moveit2.move_to_configuration([0.8832625150680542,-1.5883520285235804, 1.588944911956787, -1.5696714560138147, -1.5702937285052698, -0.6869242827044886])
-        if not self.wait_for_motion():
-            if self.stop_was_requested():
-                return False
-            raise RuntimeError("MoveIt planned the pen approach motion, but execution did not complete")
+        if not self.go_home():
+            return False
+        pen_approach_configuration = [0.8832625150680542,-1.5883520285235804, 1.588944911956787, -1.5696714560138147, -1.5702937285052698, -0.6869242827044886]
+        if not self.move_to_joint_configuration(pen_approach_configuration, "pen approach motion"):
+            return False
         # Move to ready pose above the pen + extra distance to ensure pentip not gonna collide with top of pen storage 
         new_ready_position = ready_position + np.array([0.0, 0.0, 0.17])  # Add 17 cm in z to be safely above
-        self.moveit2.move_to_pose(
-            position=new_ready_position.tolist(),
-            quat_xyzw=ready_quat.tolist(),
-            cartesian=True
-        )
-        if not self.wait_for_motion():
-            if self.stop_was_requested():
-                return False
-            raise RuntimeError("MoveIt planned the wrist rotation, but execution did not complete")
+        if not self.move_to_pose_unwrapped(
+            new_ready_position.tolist(),
+            detach_approach_quat.tolist(),
+            "pen detach ready pose"
+        ):
+            return False
         # Move down to detach the pen
         dist_tool_to_ready = new_ready_position[2] - ready_position[2]
         self.move_vertical(-dist_tool_to_ready)
         # Rotate in the opposite direction to unlock and drop the pen
-        if not self.rotate_end_effector(-360.0, degrees=True):
+        if not self.rotate_end_effector(-440.0, degrees=True):
             return False
-        if not self.rotate_end_effector(-360.0, degrees=True):
+        if not self.rotate_end_effector(-440.0, degrees=True):
             return False    
         # Go back up after dropping the pen
         if not self.move_vertical(dist_tool_to_ready):  # Move up past the original ready position to avoid collision with pen storage
             return False
-        if not self.rotate_end_effector(720.0, degrees=True):  # Rotate back to original orientation after detaching the pen
-            return False    
         # After detaching, move back to home.
         return self.go_home()
 
@@ -1024,37 +1034,33 @@ class MotionNode(Node):
         # Go home first to ensure a consistent starting pose for MoveIt planning to the pen ready pose
         if not self.go_home():
             return False
-        self.moveit2.move_to_configuration([0.8832625150680542,-1.5883520285235804, 1.588944911956787, -1.5696714560138147, -1.5702937285052698, -0.6869242827044886])
-        if not self.wait_for_motion():
-            if self.stop_was_requested():
-                return False
-            raise RuntimeError("MoveIt planned the pen approach motion, but execution did not complete")
+        pen_approach_configuration = [0.8832625150680542,-1.5883520285235804, 1.588944911956787, -1.5696714560138147, -1.5702937285052698, -0.6869242827044886]
+        if not self.move_to_joint_configuration(pen_approach_configuration, "pen approach motion"):
+            return False
         new_ready_position = ready_position + np.array([0.0, 0.0, 0.08])  # Add 8 cm in z to be safely above    
         # Move to the calibrated pen-dock orientation above the pen.
-        self.moveit2.move_to_pose(
-            position=new_ready_position.tolist(),
-            quat_xyzw=ready_quat.tolist(),
-            cartesian=True
-        )
-        if not self.wait_for_motion():
-            if self.stop_was_requested():
-                return False
-            raise RuntimeError("MoveIt planned the pen approach motion, but execution did not complete")
+        if not self.move_to_pose_unwrapped(
+            new_ready_position.tolist(),
+            ready_quat.tolist(),
+            "pen attach ready pose"
+        ):
+            return False
         #The ready to attach position is above the pen. Move down to grasp it.
         dist_tool_to_ready = new_ready_position[2] - ready_position[2]
         if not self.move_vertical(-dist_tool_to_ready):
             return False
         # Twist while in contact to secure the pen, then lift up with the pen
-        if not self.rotate_end_effector(360.0, degrees=True):
+        if not self.rotate_end_effector(440.0, degrees=True):
             return False
-        if not self.rotate_end_effector(360.0, degrees=True):
+        if not self.rotate_end_effector(440.0, degrees=True):
             return False
         # Lift up 10 cm with the pen
         if not self.move_vertical(dist_tool_to_ready + 0.10):  # Move up past the original ready position to avoid collision with pen storage
             return False
-        # Rotate back to original orientation after attaching the pen to be ready for drawing  
-        if not self.rotate_end_effector(-720, degrees=True):
-            return False
+        self.pen_detach_approach_quats[int(pen_index)] = self.get_current_tool_quat()
+        # # Rotate back to original orientation after attaching the pen to be ready for drawing  
+        # if not self.rotate_end_effector(-720, degrees=True):
+        #     return False
         return self.go_home()  # After attaching, move back to home.
         
 #---------------------------------------------7. Cartesian Utility Motion-------------------------------
@@ -1118,11 +1124,19 @@ class MotionNode(Node):
         if not self.wait_for_fresh_joint_state():
             self.get_logger().warn("Planning vertical motion without a fresh joint state")
 
-        joint_trajectory = self.moveit2.plan(
-            position=target_position,
-            quat_xyzw=target_quat,
-            cartesian=True
-        )
+        old_max_velocity = self.moveit2.max_velocity
+        old_max_acceleration = self.moveit2.max_acceleration
+        try:
+            self.moveit2.max_velocity = self.vertical_motion_max_velocity
+            self.moveit2.max_acceleration = self.vertical_motion_max_acceleration
+            joint_trajectory = self.moveit2.plan(
+                position=target_position,
+                quat_xyzw=target_quat,
+                cartesian=True
+            )
+        finally:
+            self.moveit2.max_velocity = old_max_velocity
+            self.moveit2.max_acceleration = old_max_acceleration
         joint_trajectory = self.unwrap_wrist_trajectory_to_current_state(joint_trajectory)
         self.moveit2.execute(joint_trajectory)
 
@@ -1145,6 +1159,23 @@ class MotionNode(Node):
             positions.append(joint_state.position[joint_state.name.index(joint_name)])
 
         return positions
+
+    def get_current_tool_quat(self):
+        transform = self.tf_buffer.lookup_transform(
+            "base_link",
+            "tool0",
+            rclpy.time.Time()
+        )
+        orientation = transform.transform.rotation
+        return np.array(
+            [
+                orientation.x,
+                orientation.y,
+                orientation.z,
+                orientation.w,
+            ],
+            dtype=float
+        )
 
     def normalize_angle(self, angle):
         return (float(angle) + np.pi) % (2.0 * np.pi) - np.pi
