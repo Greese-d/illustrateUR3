@@ -2,17 +2,27 @@ import cv2
 import numpy as np
 import mediapipe as mp
 import os
-from typing import List, Tuple
+from glob import glob
+from typing import List, Tuple, Optional, Any
 from ament_index_python.packages import get_package_share_directory
 
-import portrait_vectorisation.sig_gen as sig_gen
+import portrait_vectorisation.svg_to_strokes as svg_to_strokes
 
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Path
 
+try:
+    import onnxruntime as ort
+    _ONNX_AVAILABLE = True
+except Exception:
+    ort = None
+    _ONNX_AVAILABLE = False
+
 # A stroke is a nav_msgs/Path where each PoseStamped encodes one (x, y) pixel
 # coordinate as pose.position.x / .y, with z=0 and identity orientation.
 Stroke = Path
+
+EmotionScores = List[Tuple[str, float]]
 
 # Internal working type — plain (x, y) tuples used during chaining / sorting
 # before the final conversion to Path messages.
@@ -27,6 +37,7 @@ class PortraitProcessor:
         sort_strokes: bool = True,
         min_stroke_length: float = 20.0,
         signature_scale: float = 0.40,
+        emotion_model_path: Optional[str] = None,
     ):
         """
         Parameters
@@ -49,6 +60,23 @@ class PortraitProcessor:
         self.sort_strokes = sort_strokes
         self.min_stroke_length = min_stroke_length
         self.signature_scale = signature_scale
+        self.emotion_labels = [
+            "neutral",
+            "happiness",
+            "surprise",
+            "sadness",
+            "anger",
+            "disgust",
+            "fear",
+            "contempt",
+        ]
+        self.emotion_model_path: Optional[str] = None
+        self.emotion_session: Any = None
+        self.emotion_input_name: Optional[str] = None
+        self.emotion_input_layout: Optional[str] = None
+        self.emotion_input_hw: Tuple[int, int] = (64, 64)
+        self.emotion_input_channels: int = 1
+        self.emotion_available = False
 
         mp_face = mp.solutions.face_mesh
         self.face_mesh = mp_face.FaceMesh(static_image_mode=False)
@@ -66,6 +94,14 @@ class PortraitProcessor:
         self.signature_strokes = self._load_signature_svg(
             os.path.join(base, "signature", "signature.svg")
         )
+        self.emotion_svgs = self._load_emotion_svgs(os.path.join(base, "emotions"))
+
+        self.emotion_model_path = emotion_model_path or os.path.join(
+            base,
+            "models",
+            "emotion-ferplus-8.onnx",
+        )
+        self._init_emotion_session()
 
     # ------------------------------------------------------------------
     # Public API
@@ -76,7 +112,8 @@ class PortraitProcessor:
         image: np.ndarray,
         frame_id: str = 'camera_frame',
         mask_type: str = "none",
-    ) -> Tuple[np.ndarray, List[Stroke]]:
+        emotion_image: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, List[Stroke], Optional[str], Optional[EmotionScores]]:
         """
         Full portrait processing pipeline.
 
@@ -87,6 +124,9 @@ class PortraitProcessor:
         frame_id : str
             frame_id written into every Path and PoseStamped header.
             Should match whatever frame_id the rest of your pipeline expects.
+        emotion_image : Optional[np.ndarray]
+            If provided, emotion detection uses this image instead of the
+            portrait input image.
 
         Returns
         -------
@@ -98,7 +138,15 @@ class PortraitProcessor:
             pixel coordinates; z is 0 and orientation is identity quaternion.
             The list is ordered to minimise total travel distance between
             consecutive strokes.
+        emotion : Optional[str]
+            Dominant emotion label detected from the subject, or None if no
+            face was found or the ONNX model is unavailable.
+        emotion_scores : Optional[List[Tuple[str, float]]]
+            Top-3 emotion scores in descending order, or None if unavailable.
         """
+        emotion_source = emotion_image if emotion_image is not None else image
+        face_bbox = self._face_bbox(emotion_source)
+        emotion, emotion_scores = self.detect_emotion(emotion_source)
         img = self.remove_background(image)
         if mask_type != "none":
             img = self.apply_mask(img, mask_type)
@@ -110,6 +158,13 @@ class PortraitProcessor:
         raw_strokes = self._contours_to_raw(raw_contours)
         raw_strokes = self._chain_strokes(raw_strokes)
 
+        raw_strokes = self._add_emotion_strokes(
+            raw_strokes,
+            img.shape,
+            emotion,
+            face_bbox,
+        )
+
         raw_strokes = self._add_signature_strokes(raw_strokes, img.shape)
 
         if self.sort_strokes:
@@ -117,11 +172,187 @@ class PortraitProcessor:
 
         canvas = self._render(edges, raw_strokes)
         strokes = [self._raw_to_path(s, frame_id) for s in raw_strokes]
-        return canvas, strokes
+        return canvas, strokes, emotion, emotion_scores
 
     def close(self):
         self.segmenter.close()
         self.face_mesh.close()
+
+    # ------------------------------------------------------------------
+    # Emotion detection (ONNX)
+    # ------------------------------------------------------------------
+
+    def detect_emotion(self, image: np.ndarray) -> Tuple[Optional[str], Optional[EmotionScores]]:
+        if not self.emotion_session:
+            return None, None
+
+        bbox = self._face_bbox(image)
+        if not bbox:
+            return None, None
+
+        x0, y0, x1, y1 = bbox
+        face = image[y0:y1, x0:x1]
+        if face.size == 0:
+            return None, None
+
+        input_data = self._prepare_emotion_input(face)
+        if input_data is None:
+            return None, None
+
+        try:
+            outputs = self.emotion_session.run(
+                None,
+                {self.emotion_input_name: input_data},
+            )
+        except Exception:
+            return None, None
+
+        if not outputs:
+            return None, None
+
+        scores = np.array(outputs[0]).squeeze()
+        if scores.ndim != 1:
+            return None, None
+
+        limit = min(scores.shape[0], len(self.emotion_labels))
+        if limit == 0:
+            return None, None
+
+        scores = scores[:limit]
+        labels = self.emotion_labels[:limit]
+        probs = self._softmax(scores)
+        filtered = [
+            (label, float(prob))
+            for label, prob in zip(labels, probs)
+            if label != "neutral"
+        ]
+        filtered.sort(key=lambda item: item[1], reverse=True)
+        top_scores = filtered[:3]
+        dominant = top_scores[0][0] if top_scores else None
+
+        return dominant, top_scores
+
+    def _softmax(self, scores: np.ndarray) -> np.ndarray:
+        shifted = scores - np.max(scores)
+        exp_scores = np.exp(shifted)
+        denom = np.sum(exp_scores)
+        if denom == 0:
+            return np.zeros_like(scores)
+        return exp_scores / denom
+
+    def _init_emotion_session(self) -> None:
+        if not _ONNX_AVAILABLE:
+            return
+
+        if not self.emotion_model_path or not os.path.exists(self.emotion_model_path):
+            return
+
+        try:
+            self.emotion_session = ort.InferenceSession(
+                self.emotion_model_path,
+                providers=["CPUExecutionProvider"],
+            )
+            input_meta = self.emotion_session.get_inputs()[0]
+        except Exception:
+            self.emotion_session = None
+            return
+
+        layout, hw, channels = self._parse_emotion_input_shape(input_meta.shape)
+        if not layout:
+            self.emotion_session = None
+            return
+
+        self.emotion_input_name = input_meta.name
+        self.emotion_input_layout = layout
+        self.emotion_input_hw = hw
+        self.emotion_input_channels = channels
+        self.emotion_available = True
+
+    def _parse_emotion_input_shape(
+        self,
+        shape: List[Any],
+    ) -> Tuple[Optional[str], Tuple[int, int], int]:
+        if not shape or len(shape) != 4:
+            return None, (0, 0), 0
+
+        _, d1, d2, d3 = shape
+        def _dim_value(dim: Any, fallback: int) -> int:
+            if isinstance(dim, (int, np.integer)):
+                return int(dim)
+            return fallback
+
+        if d1 in (1, 3):
+            channels = int(d1)
+            height = _dim_value(d2, 64)
+            width = _dim_value(d3, 64)
+            return "NCHW", (height, width), channels
+
+        if d3 in (1, 3):
+            channels = int(d3)
+            height = _dim_value(d1, 64)
+            width = _dim_value(d2, 64)
+            return "NHWC", (height, width), channels
+
+        return None, (0, 0), 0
+
+    def _prepare_emotion_input(self, face: np.ndarray) -> Optional[np.ndarray]:
+        height, width = self.emotion_input_hw
+        if height <= 0 or width <= 0:
+            return None
+
+        if self.emotion_input_channels == 1:
+            gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
+            resized = cv2.resize(gray, (width, height), interpolation=cv2.INTER_AREA)
+            data = resized.astype(np.float32)
+
+            if self.emotion_input_layout == "NCHW":
+                return data[np.newaxis, np.newaxis, :, :]
+            if self.emotion_input_layout == "NHWC":
+                return data[np.newaxis, :, :, np.newaxis]
+            return None
+
+        rgb = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
+        resized = cv2.resize(rgb, (width, height), interpolation=cv2.INTER_AREA)
+        data = resized.astype(np.float32)
+
+        if self.emotion_input_layout == "NCHW":
+            data = np.transpose(data, (2, 0, 1))
+            return data[np.newaxis, :, :, :]
+        if self.emotion_input_layout == "NHWC":
+            return data[np.newaxis, :, :, :]
+        return None
+
+    def _face_bbox(self, image: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
+        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        res = self.face_mesh.process(rgb)
+        if not res.multi_face_landmarks:
+            return None
+
+        lm = res.multi_face_landmarks[0].landmark
+        h, w = image.shape[:2]
+        xs = [int(p.x * w) for p in lm]
+        ys = [int(p.y * h) for p in lm]
+
+        min_x = max(0, min(xs))
+        max_x = min(w, max(xs))
+        min_y = max(0, min(ys))
+        max_y = min(h, max(ys))
+
+        if max_x <= min_x or max_y <= min_y:
+            return None
+
+        pad_x = int((max_x - min_x) * 0.2)
+        pad_y = int((max_y - min_y) * 0.2)
+
+        x0 = max(0, min_x - pad_x)
+        y0 = max(0, min_y - pad_y)
+        x1 = min(w, max_x + pad_x)
+        y1 = min(h, max_y + pad_y)
+
+        if x1 <= x0 or y1 <= y0:
+            return None
+
+        return x0, y0, x1, y1
 
     # ------------------------------------------------------------------
     # Background removal (unchanged from original)
@@ -305,16 +536,31 @@ class PortraitProcessor:
         return bg
 
     def _load_signature_svg(self, path: str) -> List[_RawStroke] | None:
+        return self._load_svg_strokes(path)
+
+    def _load_emotion_svgs(self, folder: str) -> dict:
+        if not os.path.isdir(folder):
+            return {}
+
+        emotions = {}
+        for path in glob(os.path.join(folder, "*.svg")):
+            name = os.path.splitext(os.path.basename(path))[0].lower()
+            strokes = self._load_svg_strokes(path)
+            if strokes:
+                emotions[name] = strokes
+        return emotions
+
+    def _load_svg_strokes(self, path: str) -> List[_RawStroke] | None:
         if not os.path.exists(path):
             return None
         try:
             with open(path, "r", encoding="utf-8") as handle:
                 svg_text = handle.read()
             try:
-                svg_text = sig_gen.extract_svg_text(svg_text)
+                svg_text = svg_to_strokes.extract_svg_text(svg_text)
             except ValueError:
                 pass
-            strokes = sig_gen.svg_to_strokes(svg_text)
+            strokes = svg_to_strokes.svg_to_strokes(svg_text)
             if not isinstance(strokes, list):
                 return None
             return [
@@ -378,6 +624,109 @@ class PortraitProcessor:
                 )
                 for x, y in stroke
             ])
+
+        return strokes + placed
+
+    def _add_emotion_strokes(
+        self,
+        strokes: List[_RawStroke],
+        image_shape: Tuple[int, int, int],
+        emotion: Optional[str],
+        face_bbox: Optional[Tuple[int, int, int, int]],
+    ) -> List[_RawStroke]:
+        if not emotion or emotion not in self.emotion_svgs:
+            return strokes
+
+        if not face_bbox:
+            return strokes
+
+        emoji = self.emotion_svgs.get(emotion)
+        if not emoji:
+            return strokes
+
+        img_h, img_w = image_shape[:2]
+        fx0, fy0, fx1, fy1 = face_bbox
+
+        emoji_points = [p for stroke in emoji for p in stroke]
+        xs = [p[0] for p in emoji_points]
+        ys = [p[1] for p in emoji_points]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        emoji_w = max_x - min_x
+        emoji_h = max_y - min_y
+        if emoji_w <= 0 or emoji_h <= 0:
+            return strokes
+
+        pad = max(5, int(min(img_w, img_h) * 0.02))
+        left_region = (pad, fx0 - pad)
+        right_region = (fx1 + pad, img_w - pad)
+
+        face_h = max(1, fy1 - fy0)
+        region_h = min(img_h - (2 * pad), max(int(face_h * 1.1), int(img_h * 0.25)))
+        center_y = int((fy0 + fy1) / 2)
+        region_y0 = max(pad, int(center_y - region_h / 2))
+        region_y1 = min(img_h - pad, region_y0 + region_h)
+        region_h = max(0, region_y1 - region_y0)
+
+        points = [p for stroke in strokes for p in stroke]
+
+        def region_density(x0: int, x1: int) -> Optional[float]:
+            if x1 <= x0 or region_h <= 0:
+                return None
+            area = (x1 - x0) * region_h
+            if area <= 0:
+                return None
+            hits = sum(1 for px, py in points if x0 <= px <= x1 and region_y0 <= py <= region_y1)
+            return hits / area
+
+        left_density = region_density(int(left_region[0]), int(left_region[1]))
+        right_density = region_density(int(right_region[0]), int(right_region[1]))
+
+        candidates = []
+        if left_density is not None:
+            candidates.append((left_density, "left"))
+        if right_density is not None:
+            candidates.append((right_density, "right"))
+        if not candidates:
+            return strokes
+
+        _, side = min(candidates, key=lambda item: item[0])
+        if side == "left":
+            region_x0, region_x1 = int(left_region[0]), int(left_region[1])
+        else:
+            region_x0, region_x1 = int(right_region[0]), int(right_region[1])
+
+        region_w = max(0, region_x1 - region_x0)
+        if region_w <= 0 or region_h <= 0:
+            return strokes
+
+        scale = min(region_w * 0.9 / emoji_w, region_h * 0.9 / emoji_h)
+        max_scale = (img_h * 0.3) / emoji_h
+        scale = min(scale, max_scale)
+        if scale <= 0:
+            return strokes
+
+        target_cx = (region_x0 + region_x1) / 2
+        target_cy = (region_y0 + region_y1) / 2
+        center_x = (min_x + max_x) / 2
+        center_y = (min_y + max_y) / 2
+        angle_deg = 20.0 if side == "right" else -20.0
+        angle_rad = np.deg2rad(angle_deg)
+        cos_a = float(np.cos(angle_rad))
+        sin_a = float(np.sin(angle_rad))
+
+        placed: List[_RawStroke] = []
+        for stroke in emoji:
+            rotated: _RawStroke = []
+            for x, y in stroke:
+                dx = x - center_x
+                dy = y - center_y
+                rx = (dx * cos_a) - (dy * sin_a)
+                ry = (dx * sin_a) + (dy * cos_a)
+                px = (rx * scale) + target_cx
+                py = (ry * scale) + target_cy
+                rotated.append((int(round(px)), int(round(py))))
+            placed.append(rotated)
 
         return strokes + placed
 

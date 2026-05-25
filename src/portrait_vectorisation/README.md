@@ -63,6 +63,7 @@ portrait_vectorisation/
 | `cv_bridge` | Converts between ROS2 `Image` and OpenCV `ndarray` |
 | `opencv-python` | Image processing (bilateral filter, Canny, contours) |
 | `mediapipe` | Background removal via Selfie Segmentation |
+| `onnxruntime` | Optional: emotion detection via ONNX model |
 | `numpy` | Array manipulation |
 
 Install Python dependencies:
@@ -70,6 +71,27 @@ Install Python dependencies:
 ```bash
 pip install opencv-python
 python3 -m pip install --user "numpy==1.26.4" "mediapipe==0.10.13"
+```
+
+Optional emotion detection dependency:
+
+```bash
+python3 -m pip install --user onnxruntime
+```
+
+To enable emotion detection, place an ONNX model at:
+
+```
+portrait_vectorisation/models/emotion-ferplus-8.onnx
+```
+
+If the model is missing, the node runs normally and emotion detection is disabled.
+
+You can also point to a custom model path via the `emotion_model_path` parameter:
+
+```bash
+ros2 run portrait_vectorisation image_processing_node --ros-args \
+  -p emotion_model_path:=/abs/path/to/emotion.onnx
 ```
 
 ---
@@ -132,6 +154,8 @@ Processes snapshots into portrait strokes on demand. All operations are triggere
 | `/portrait/preview` | `sensor_msgs/Image` | Black-on-white edge preview of the processed portrait (mono8) |
 | `/portrait/strokes` | `nav_msgs/Path` | One message per stroke; `pose.position.x/y` are pixel coordinates, `z = 0` |
 | `/portrait/markers` | `visualization_msgs/MarkerArray` | All strokes in a single message for RViz2 visualisation |
+| `/portrait/emotion` | `std_msgs/String` | Dominant emotion label per portrait (if enabled) |
+| `/portrait/emotion_scores` | `std_msgs/String` | Top-3 emotion scores per portrait (if enabled) |
 
 **Services**
 
@@ -151,6 +175,8 @@ Both services return `success: bool` and `message: string` in the response. On f
 | `portrait_topic` | `string` | `/portrait/preview` | Topic to publish the preview image on |
 | `strokes_topic` | `string` | `/portrait/strokes` | Topic to publish individual stroke paths on |
 | `markers_topic` | `string` | `/portrait/markers` | Topic to publish the RViz2 marker array on |
+| `emotion_topic` | `string` | `/portrait/emotion` | Topic to publish the detected emotion label on |
+| `emotion_scores_topic` | `string` | `/portrait/emotion_scores` | Topic to publish the top-3 emotion scores on |
 | `stroke_publish_delay` | `float` | `0.05` | Delay in seconds between publishing consecutive strokes, to ensure ordered delivery |
 
 **Run**

@@ -6,6 +6,7 @@ from sensor_msgs.msg import Image
 from nav_msgs.msg import Path
 from std_srvs.srv import Trigger
 from visualization_msgs.msg import Marker, MarkerArray
+from std_msgs.msg import String
 import cv2
 from cv_bridge import CvBridge
 from rcl_interfaces.msg import SetParametersResult
@@ -26,10 +27,13 @@ class ImgProcessingNode(Node):
         self.declare_parameter('portrait_topic', '/portrait/preview')
         self.declare_parameter('strokes_topic', '/portrait/strokes')
         self.declare_parameter('markers_topic', '/portrait/markers')
+        self.declare_parameter('emotion_topic', '/portrait/emotion')
+        self.declare_parameter('emotion_scores_topic', '/portrait/emotion_scores')
         self.declare_parameter('mask_type', 'none')
         self.declare_parameter('masked_preview_topic', '/camera/masked_preview')
         self.declare_parameter('min_stroke_length', 20.0)
         self.declare_parameter('signature_scale', 0.30)
+        self.declare_parameter('emotion_model_path', '')
 
         self._stroke_delay  = self.get_parameter('stroke_publish_delay').value
         camera_topic        = self.get_parameter('camera_topic').value
@@ -37,21 +41,44 @@ class ImgProcessingNode(Node):
         portrait_topic      = self.get_parameter('portrait_topic').value
         strokes_topic       = self.get_parameter('strokes_topic').value
         markers_topic       = self.get_parameter('markers_topic').value
+        emotion_topic       = self.get_parameter('emotion_topic').value
+        emotion_scores_topic = self.get_parameter('emotion_scores_topic').value
         masked_preview_topic = self.get_parameter('masked_preview_topic').value
         min_stroke_length   = self.get_parameter('min_stroke_length').value
+        self._publish_strokes = True
+        emotion_model_path = self.get_parameter('emotion_model_path').value
+        if isinstance(emotion_model_path, str):
+            emotion_model_path = emotion_model_path.strip() or None
+        else:
+            emotion_model_path = None
 
         # ------------------------------------------------------------------ #
         # State                                                                #
         # ------------------------------------------------------------------ #
         self.latest_raw_image: Image | None = None      # most recent frame from camera
         self.latest_masked_image: Image | None = None   # most recent masked preview frame
-        self.snapshot:     Image | None = None          # frozen frame ready for processing
+        self.snapshot_raw:    Image | None = None       # frozen raw frame for emotion
+        self.snapshot_masked: Image | None = None       # frozen masked frame for portrait
         self._snapshot_used = False              # True once snapshot has been processed
 
         self.bridge     = CvBridge()
-        self.processor  = pp.PortraitProcessor(min_stroke_length=min_stroke_length, signature_scale=self.get_parameter('signature_scale').value)
+        self.processor  = pp.PortraitProcessor(
+            min_stroke_length=min_stroke_length,
+            signature_scale=self.get_parameter('signature_scale').value,
+            emotion_model_path=emotion_model_path,
+        )
         self.allowed_masks = {"none"} | set(self.processor.masks.keys())
         self.mask_type = self.get_parameter('mask_type').value
+
+        if not self.processor.emotion_available:
+            self.get_logger().warn(
+                "Emotion model not available; emotion detection disabled. "
+                "Provide an ONNX model to enable emotion logs."
+            )
+        else:
+            self.get_logger().info(
+                f"Emotion model loaded from: {self.processor.emotion_model_path}"
+            )
 
         self.add_on_set_parameters_callback(self.param_callback)
 
@@ -78,6 +105,8 @@ class ImgProcessingNode(Node):
         self.portrait_pub = self.create_publisher(Image,       portrait_topic, 10)
         self.stroke_pub   = self.create_publisher(Path,        strokes_topic,  50)
         self.marker_pub   = self.create_publisher(MarkerArray, markers_topic,  10)
+        self.emotion_pub  = self.create_publisher(String,      emotion_topic,  10)
+        self.emotion_scores_pub = self.create_publisher(String, emotion_scores_topic, 10)
         self.masked_pub   = self.create_publisher(Image,       masked_preview_topic, 10)
 
         # ------------------------------------------------------------------ #
@@ -152,20 +181,21 @@ class ImgProcessingNode(Node):
         Freeze the most recent camera frame into the snapshot buffer and
         publish it on the snapshot topic.
         """
-        if self.latest_masked_image is None:
+        if self.latest_raw_image is None or self.latest_masked_image is None:
             msg = (
-                'No masked preview received yet. '
-                'Is the mask preview running?'
+                'No camera frame received yet. '
+                'Is the camera publisher running and mask preview active?'
             )
             self.get_logger().warn(msg)
             response.success = False
             response.message = msg
             return response
 
-        self.snapshot = self.latest_masked_image
+        self.snapshot_raw = self.latest_raw_image
+        self.snapshot_masked = self.latest_masked_image
         self._snapshot_used = False
 
-        self.snapshot_pub.publish(self.snapshot)
+        self.snapshot_pub.publish(self.snapshot_masked)
         self.get_logger().info('Snapshot captured and published.')
         response.success = True
         response.message = 'Snapshot captured successfully.'
@@ -186,8 +216,8 @@ class ImgProcessingNode(Node):
         a fresh snapshot is taken automatically before proceeding.
         """
         # ---- ensure we have a fresh snapshot --------------------------------
-        if self.snapshot is None or self._snapshot_used:
-            reason = 'empty' if self.snapshot is None else 'already processed'
+        if self.snapshot_raw is None or self.snapshot_masked is None or self._snapshot_used:
+            reason = 'empty' if (self.snapshot_raw is None or self.snapshot_masked is None) else 'already processed'
             self.get_logger().info(
                 f'Snapshot buffer is {reason}. '
                 f'Taking a fresh snapshot automatically.'
@@ -203,8 +233,11 @@ class ImgProcessingNode(Node):
 
         # ---- convert ROS image → OpenCV -------------------------------------
         try:
-            cv_image = self.bridge.imgmsg_to_cv2(
-                self.snapshot, desired_encoding='bgr8'
+            cv_masked = self.bridge.imgmsg_to_cv2(
+                self.snapshot_masked, desired_encoding='bgr8'
+            )
+            cv_raw = self.bridge.imgmsg_to_cv2(
+                self.snapshot_raw, desired_encoding='bgr8'
             )
         except Exception as e:
             msg = f'Failed to decode snapshot image: {e}'
@@ -216,13 +249,28 @@ class ImgProcessingNode(Node):
         # ---- run portrait processing pipeline --------------------------------
         self.get_logger().info('Starting portrait processing pipeline...')
         try:
-            canvas, strokes = self.processor.process(cv_image)
+            canvas, strokes, emotion, emotion_scores = self.processor.process(
+                cv_masked,
+                emotion_image=cv_raw,
+            )
         except Exception as e:
             msg = f'Portrait processing failed: {e}'
             self.get_logger().error(msg)
             response.success = False
             response.message = msg
             return response
+
+        if emotion:
+            msg = String()
+            msg.data = emotion
+            self.emotion_pub.publish(msg)
+
+        if emotion_scores:
+            score_msg = String()
+            score_msg.data = ", ".join(
+                f"{label}:{score:.3f}" for label, score in emotion_scores
+            )
+            self.emotion_scores_pub.publish(score_msg)
 
         if not strokes:
             msg = (
@@ -248,6 +296,14 @@ class ImgProcessingNode(Node):
         except Exception as e:
             # Non-fatal — log and continue to stroke publishing
             self.get_logger().error(f'Failed to publish portrait preview: {e}')
+
+        if not self._publish_strokes:
+            self._snapshot_used = True
+            msg = 'Stroke publishing disabled; skipping stroke and marker output.'
+            self.get_logger().info(msg)
+            response.success = True
+            response.message = msg
+            return response
 
         # ---- publish strokes in order with delay between each ---------------
         now = self.get_clock().now().to_msg()
