@@ -3,6 +3,8 @@ from asyncio.log import logger
 import threading
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
+from moveit_msgs.srv import GetCartesianPath
+from moveit_msgs.msg import MoveItErrorCodes
 
 from geometry_msgs import msg
 import rclpy
@@ -56,6 +58,10 @@ class MotionNode(Node):
             Trigger,
             "/io_and_status_controller/resend_robot_program"
         )
+        self.cartesian_path_client = self.create_client(
+            GetCartesianPath,
+            "/compute_cartesian_path"
+        )
         self.stroke_queue = []
         self.stroke_id = 0
         self.create_subscription(Path,"/portrait/strokes", self.pen_path_callback,10)
@@ -103,6 +109,9 @@ class MotionNode(Node):
         self.get_logger().info("Motion node waiting for GUI commands...")
         self.status_pub = self.create_publisher(String, "/drawing/status", 10)
         self.state_pub = self.create_publisher(String, "/state", 10)
+        self.stroke_waypoint_spacing = 0.002
+        self.stroke_cartesian_max_step = 0.0025
+        self.stroke_cartesian_fraction_threshold = 0.95
 #----------------------------- 0. Service Handlers for Drawing Control --------------------------------
     def wait_for_motion(self):
         return self.moveit2.wait_until_executed()
@@ -259,14 +268,26 @@ class MotionNode(Node):
             drawn_path.append(point)
             self.get_logger().info(f"Moving to point: {real_point}")
             # self.visualize_rectangle(drawn_path)
-            if not self.move_to_pose_unwrapped(
-                real_point.tolist(),
-                quat,
-                "rectangle drawing motion"
-            ) or self.stop_was_requested():
+            self.moveit2.move_to_pose(
+                position=real_point.tolist(),
+                quat_xyzw=quat,
+                cartesian=True
+            )
+            if not self.wait_for_motion() or self.stop_was_requested():
                 self.get_logger().info("Rectangle drawing stopped")
                 return False
             self.visualize_rectangle(drawn_path)
+        lift_height = 0.02
+        last_point = path[-1]
+        end_up = self.paper_point_to_tool_point(last_point, z_axis, lift_height)
+        self.moveit2.move_to_pose(
+            position=end_up.tolist(),
+            quat_xyzw=quat,
+            cartesian=True
+        )
+        if not self.wait_for_motion() or self.stop_was_requested():
+            self.get_logger().info("Rectangle lift stopped")
+            return False
         self.get_logger().info("Rectangle done")
         return True
 #--------------------------------------- 3. Visualization-----------------------------------------------
@@ -629,7 +650,7 @@ class MotionNode(Node):
 
     def compute_portrait_mapping(self, strokes):
         P1, P2, P3, width, height, center, x_axis, y_axis, z_axis, quat = self.load_calibration()
-        portrait_scale = 0.9
+        portrait_scale = 1.0
         rotation_degrees = 90.0
         points = [
             (pose.pose.position.x, pose.pose.position.y)
@@ -649,7 +670,8 @@ class MotionNode(Node):
 
         # Keep the portrait inside the rectangle drawn 1 cm in from the paper edge,
         # with a little extra padding so pen thickness/calibration error does not cross it.
-        margin = min(0.015, width * 0.20, height * 0.20)
+        #margin = min(0.015, width * 0.20, height * 0.20)
+        margin = 0.0
         drawable_width = max(width - 2.0 * margin, width * 0.50)
         drawable_height = max(height - 2.0 * margin, height * 0.50)
         metres_per_pixel = min(
@@ -691,6 +713,116 @@ class MotionNode(Node):
             + delta[1] * mapping["metres_per_pixel"] * mapping["y_axis"]
         )
 
+    def paper_point_to_tool_point(self, point, z_axis, lift_height=0.0):
+        offset = self.tcp_offset + float(lift_height)
+        if z_axis[2] < 0:
+            return point - offset * z_axis
+        return point + offset * z_axis
+
+    def make_pose(self, position, quat):
+        pose = Pose()
+        pose.position.x = float(position[0])
+        pose.position.y = float(position[1])
+        pose.position.z = float(position[2])
+        pose.orientation.x = float(quat[0])
+        pose.orientation.y = float(quat[1])
+        pose.orientation.z = float(quat[2])
+        pose.orientation.w = float(quat[3])
+        return pose
+
+    def downsample_points_by_distance(self, points, min_spacing):
+        if len(points) <= 2:
+            return points
+
+        filtered = [points[0]]
+        for point in points[1:-1]:
+            if np.linalg.norm(point - filtered[-1]) >= min_spacing:
+                filtered.append(point)
+
+        if np.linalg.norm(points[-1] - filtered[-1]) > 1e-6:
+            filtered.append(points[-1])
+
+        return filtered
+
+    def execute_cartesian_waypoints(self, tool_points, quat):
+        if len(tool_points) == 0:
+            return True
+
+        if not self.cartesian_path_client.wait_for_service(timeout_sec=2.0):
+            self.get_logger().warn("/compute_cartesian_path service is not available")
+            return False
+
+        request = GetCartesianPath.Request()
+        request.header.stamp = self.get_clock().now().to_msg()
+        request.header.frame_id = ur.base_link_name()
+        request.group_name = ur.MOVE_GROUP_ARM
+        request.link_name = ur.end_effector_name()
+        request.max_step = self.stroke_cartesian_max_step
+        request.jump_threshold = 0.0
+        request.avoid_collisions = False
+        request.waypoints = [self.make_pose(point, quat) for point in tool_points]
+
+        if self.moveit2.joint_state is not None:
+            request.start_state.joint_state = self.moveit2.joint_state
+
+        future = self.cartesian_path_client.call_async(request)
+        while not future.done():
+            if self.stop_was_requested():
+                return False
+            rclpy.spin_once(self, timeout_sec=0.05)
+
+        try:
+            response = future.result()
+        except Exception as e:
+            self.get_logger().warn(f"Cartesian waypoint planning request failed: {e}")
+            return False
+
+        if response.error_code.val != MoveItErrorCodes.SUCCESS:
+            self.get_logger().warn(
+                f"Cartesian waypoint planning failed with error code {response.error_code.val}"
+            )
+            return False
+
+        if response.fraction < self.stroke_cartesian_fraction_threshold:
+            self.get_logger().warn(
+                "Cartesian waypoint planning only completed "
+                f"{response.fraction:.2f} of the stroke"
+            )
+            return False
+
+        self.moveit2.execute(response.solution.joint_trajectory)
+        if not self.wait_for_motion() or self.stop_was_requested():
+            return False
+
+        return True
+
+    def draw_stroke_point_by_point(self, msg, mapping, z_axis, quat):
+        drawn_path = []
+        for pose_index, pose in enumerate(msg.poses):
+            if self.stop_was_requested():
+                return self.remaining_path_from(msg, pose_index)
+
+            point = self.pixel_to_paper_point(
+                pose.pose.position.x,
+                pose.pose.position.y,
+                mapping,
+            )
+            real_point = self.paper_point_to_tool_point(point, z_axis)
+
+            self.moveit2.move_to_pose(
+                position=real_point.tolist(),
+                quat_xyzw=quat,
+                cartesian=True
+            )
+            if not self.wait_for_motion() or self.stop_was_requested():
+                return self.remaining_path_from(msg, pose_index)
+
+            drawn_path.append(point)
+            self.visualize_stroke_path(drawn_path)
+            self.stroke_id += 1
+
+        return None
+
     def draw_stroke(self, msg: Path):
         P1, P2, P3, width, height, center, x_axis, y_axis, z_axis, quat = self.load_calibration()
         lift_height = 0.02
@@ -706,79 +838,77 @@ class MotionNode(Node):
         self.get_logger().info(f"Moving above first point: ({first.x}, {first.y})")
         start_point = self.pixel_to_paper_point(first.x, first.y, mapping)
 
-        if z_axis[2] < 0:
-            start_up = start_point - (self.tcp_offset + lift_height) * z_axis
-        else:
-            start_up = start_point + (self.tcp_offset + lift_height) * z_axis
+        start_up = self.paper_point_to_tool_point(start_point, z_axis, lift_height)
         self.get_logger().info(f"Moving above first point in real world: ({start_up[0]}, {start_up[1]}, {start_up[2]})")
         # self.visualize_start_point(start_up)
         self.get_logger().info("Started point visualization")    
-        if not self.move_to_pose_unwrapped(
-            start_up.tolist(),
-            quat,
-            "stroke start lift motion"
-        ) or self.stop_was_requested():
+        self.moveit2.move_to_pose(
+            position=start_up.tolist(),
+            quat_xyzw=quat,
+            cartesian=True
+        )
+        if not self.wait_for_motion() or self.stop_was_requested():
             return msg
         self.get_logger().info("Reached above first point")
 
         # -----------------------------
         # 2. PEN DOWN
         # -----------------------------
-        if z_axis[2] < 0:
-            start_down = start_point - self.tcp_offset * z_axis
-        else:
-            start_down = start_point + self.tcp_offset * z_axis
+        start_down = self.paper_point_to_tool_point(start_point, z_axis)
 
-        if not self.move_to_pose_unwrapped(
-            start_down.tolist(),
-            quat,
-            "stroke pen-down motion"
-        ) or self.stop_was_requested():
+        self.moveit2.move_to_pose(
+            position=start_down.tolist(),
+            quat_xyzw=quat,
+            cartesian=True,
+        )
+        if not self.wait_for_motion() or self.stop_was_requested():
             return msg
 
         # -----------------------------
         # 3. DRAW CONTINUOUSLY
         # -----------------------------
-        drawn_path = []
-        for pose_index, pose in enumerate(msg.poses):
+        paper_points = [
+            self.pixel_to_paper_point(
+                pose.pose.position.x,
+                pose.pose.position.y,
+                mapping,
+            )
+            for pose in msg.poses
+        ]
+        paper_points = self.downsample_points_by_distance(
+            paper_points,
+            self.stroke_waypoint_spacing,
+        )
+        tool_points = [
+            self.paper_point_to_tool_point(point, z_axis)
+            for point in paper_points
+        ]
+
+        self.get_logger().info(
+            f"Executing stroke as {len(tool_points)} Cartesian waypoint(s)"
+        )
+
+        if not self.execute_cartesian_waypoints(tool_points, quat):
             if self.stop_was_requested():
-                return self.remaining_path_from(msg, pose_index)
+                return msg
+            self.get_logger().warn("Falling back to point-by-point stroke execution")
+            return self.draw_stroke_point_by_point(msg, mapping, z_axis, quat)
 
-            pixel_x = pose.pose.position.x
-            pixel_y = pose.pose.position.y
-
-            point = self.pixel_to_paper_point(pixel_x, pixel_y, mapping)
-
-            if z_axis[2] < 0:
-                real_point = point - self.tcp_offset * z_axis
-            else:
-                real_point = point + self.tcp_offset * z_axis
-
-            if not self.move_to_pose_unwrapped(
-                real_point.tolist(),
-                quat,
-                "stroke drawing motion"
-            ) or self.stop_was_requested():
-                return self.remaining_path_from(msg, pose_index)
-            drawn_path.append(point)
-            self.visualize_stroke_path(drawn_path)
-            self.stroke_id += 1
+        self.visualize_stroke_path(paper_points)
+        self.stroke_id += 1
 
         # # -----------------------------
         # # 4. PEN UP AFTER STROKE
         # # -----------------------------
-        last_point = point
+        last_point = paper_points[-1]
+        end_up = self.paper_point_to_tool_point(last_point, z_axis, lift_height)
 
-        if z_axis[2] < 0:
-            end_up = last_point - (self.tcp_offset + lift_height) * z_axis
-        else:
-            end_up = last_point + (self.tcp_offset + lift_height) * z_axis
-
-        if not self.move_to_pose_unwrapped(
-            end_up.tolist(),
-            quat,
-            "stroke end lift motion"
-        ) or self.stop_was_requested():
+        self.moveit2.move_to_pose(
+            position=end_up.tolist(),
+            quat_xyzw=quat,
+            cartesian=True
+        )
+        if not self.wait_for_motion() or self.stop_was_requested():
             return Path()
         return None
 #---------------------------------------------5. Fundamental Functions (Home, Stop, Start, Resume)-------------------------------
@@ -1016,7 +1146,8 @@ class MotionNode(Node):
             return False
         # Move down to detach the pen
         dist_tool_to_ready = new_ready_position[2] - ready_position[2]
-        self.move_vertical(-dist_tool_to_ready)
+        if not self.move_vertical(-dist_tool_to_ready):
+            return False
         # Rotate in the opposite direction to unlock and drop the pen
         if not self.rotate_end_effector(-440.0, degrees=True):
             return False
@@ -1062,7 +1193,6 @@ class MotionNode(Node):
         # if not self.rotate_end_effector(-720, degrees=True):
         #     return False
         return self.go_home()  # After attaching, move back to home.
-        
 #---------------------------------------------7. Cartesian Utility Motion-------------------------------
     def unwrap_wrist_trajectory_to_current_state(self, joint_trajectory):
         if joint_trajectory is None or not joint_trajectory.points:

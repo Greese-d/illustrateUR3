@@ -5,10 +5,11 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 
-Q_SAMPLES = 20
-C_SAMPLES = 24
-CIRCLE_SAMPLES = 32
-ARC_SAMPLES = 24
+Q_SAMPLES = 32
+C_SAMPLES = 36
+CIRCLE_SAMPLES = 48
+ARC_SAMPLES = 32
+LINE_SAMPLES = 20   # intermediate waypoints on straight line segments
 
 number = r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"
 token_re = re.compile(r"[MLQZCASHVmlqzcashv]|[+-]?\d*\.?\d+(?:[eE][+-]?\d+)?")
@@ -41,6 +42,14 @@ def sample_cubic(p0, p1, p2, p3, n):
             + (t ** 3) * p3[1]
         )
         pts.append([x, y])
+    return pts
+
+def sample_line(p0, p1, n):
+    """Interpolate n intermediate points along a straight line (not including p0)."""
+    pts = []
+    for i in range(1, n + 1):
+        t = i / n
+        pts.append([p0[0] + t * (p1[0] - p0[0]), p0[1] + t * (p1[1] - p0[1])])
     return pts
 
 def sample_arc(x1, y1, rx, ry, x_rot, large_arc, sweep, x2, y2, n):
@@ -183,8 +192,8 @@ def parse_path(d):
                 if cmd == "l":
                     x += current[0]
                     y += current[1]
+                stroke.extend(sample_line(current, [x, y], LINE_SAMPLES))
                 current = (x, y)
-                stroke.append([x, y])
 
         elif cmd in "Qq":
             while at_coords():
@@ -248,16 +257,16 @@ def parse_path(d):
                 x = get_float()
                 if cmd == "h":
                     x += current[0]
+                stroke.extend(sample_line(current, [x, current[1]], LINE_SAMPLES))
                 current = (x, current[1])
-                stroke.append([x, current[1]])
 
         elif cmd in "Vv":
             while at_coords():
                 y = get_float()
                 if cmd == "v":
                     y += current[1]
+                stroke.extend(sample_line(current, [current[0], y], LINE_SAMPLES))
                 current = (current[0], y)
-                stroke.append([current[0], y])
 
         elif cmd in "Aa":
             while at_coords():

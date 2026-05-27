@@ -32,7 +32,7 @@ class ImgProcessingNode(Node):
         self.declare_parameter('mask_type', 'none')
         self.declare_parameter('masked_preview_topic', '/camera/masked_preview')
         self.declare_parameter('min_stroke_length', 20.0)
-        self.declare_parameter('signature_scale', 0.30)
+        self.declare_parameter('signature_scale', 0.40)
         self.declare_parameter('emotion_model_path', '')
 
         self._stroke_delay  = self.get_parameter('stroke_publish_delay').value
