@@ -39,8 +39,8 @@ class MotionNode(Node):
             end_effector_name=ur.end_effector_name(),
             group_name=ur.MOVE_GROUP_ARM,   
         )
-        self.moveit2.max_velocity = 0.05
-        self.moveit2.max_acceleration = 0.05
+        self.moveit2.max_velocity = 0.1
+        self.moveit2.max_acceleration = 0.1
         self.vertical_motion_max_velocity = 0.01
         self.vertical_motion_max_acceleration = 0.01
         self.fixed_orientation = [0.0, 1.0, 0.0, 0.0]
@@ -109,8 +109,8 @@ class MotionNode(Node):
         self.get_logger().info("Motion node waiting for GUI commands...")
         self.status_pub = self.create_publisher(String, "/drawing/status", 10)
         self.state_pub = self.create_publisher(String, "/state", 10)
-        self.stroke_waypoint_spacing = 0.002
-        self.stroke_cartesian_max_step = 0.0025
+        self.stroke_waypoint_spacing = 0.0005
+        self.stroke_cartesian_max_step = 0.001
         self.stroke_cartesian_fraction_threshold = 0.95
 #----------------------------- 0. Service Handlers for Drawing Control --------------------------------
     def wait_for_motion(self):
