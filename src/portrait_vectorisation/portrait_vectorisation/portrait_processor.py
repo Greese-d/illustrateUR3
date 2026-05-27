@@ -5,6 +5,7 @@ import os
 from glob import glob
 from typing import List, Tuple, Optional, Any
 from ament_index_python.packages import get_package_share_directory
+from datetime import datetime
 
 import portrait_vectorisation.svg_to_strokes as svg_to_strokes
 
@@ -95,6 +96,7 @@ class PortraitProcessor:
             os.path.join(base, "signature", "signature.svg")
         )
         self.emotion_svgs = self._load_emotion_svgs(os.path.join(base, "emotions"))
+        self._last_signature_bbox: Optional[Tuple[int, int, int, int]] = None
 
         self.emotion_model_path = emotion_model_path or os.path.join(
             base,
@@ -166,6 +168,7 @@ class PortraitProcessor:
         )
 
         raw_strokes = self._add_signature_strokes(raw_strokes, img.shape)
+        raw_strokes = self._add_date_strokes(raw_strokes, img.shape)
 
         if self.sort_strokes:
             raw_strokes = self._sort_strokes(raw_strokes)
@@ -571,12 +574,185 @@ class PortraitProcessor:
         except Exception:
             return None
 
+    def _digit_path(self, char: str, x: float, y: float, w: float = 55, h: float = 110) -> str:
+        mx = x + w / 2
+        my = y + h / 2
+        b = y + h
+        r = x + w
+
+        paths = {
+            '0': (
+                f"M{x+w*0.5} {y} "
+                f"Q{x} {y} {x} {my} "
+                f"Q{x} {b} {x+w*0.5} {b} "
+                f"Q{r} {b} {r} {my} "
+                f"Q{r} {y} {x+w*0.5} {y}"
+            ),
+            '1': (
+                f"M{x+w*0.25} {y+h*0.2} L{mx} {y} L{mx} {b}"
+            ),
+            '2': (
+                f"M{x+w*0.1} {y+h*0.2} "
+                f"Q{x+w*0.1} {y} {mx} {y} "
+                f"Q{r} {y} {r} {y+h*0.28} "
+                f"Q{r} {my} {x} {b} "
+                f"L{r} {b}"
+            ),
+            '3': (
+                f"M{x+w*0.1} {y+h*0.15} "
+                f"Q{x} {y} {mx} {y} "
+                f"Q{r} {y} {r} {y+h*0.25} "
+                f"Q{r} {my} {mx} {my} "
+                f"Q{r} {my} {r} {b-h*0.25} "
+                f"Q{r} {b} {mx} {b} "
+                f"Q{x} {b} {x+w*0.1} {b-h*0.15}"
+            ),
+            '4': (
+                f"M{r-w*0.15} {b} "
+                f"L{r-w*0.15} {y} "
+                f"L{x} {my+h*0.05} "
+                f"L{r} {my+h*0.05}"
+            ),
+            '5': (
+                f"M{r-w*0.1} {y} "
+                f"L{x} {y} "
+                f"L{x} {y+h*0.42} "
+                f"Q{x} {y+h*0.48} {mx} {y+h*0.48} "
+                f"Q{r} {y+h*0.48} {r} {b-h*0.18} "
+                f"Q{r} {b} {mx} {b} "
+                f"Q{x} {b} {x+w*0.1} {b-h*0.16}"
+            ),
+
+            '6': (
+                f"M{r} {y+h*0.15} "
+                f"C{r} {y} {mx} {y} {x+w*0.1} {y+h*0.32} "
+                f"C{x} {y+h*0.48} {x} {b} {mx} {b} "
+                f"C{r+w*0.05} {b} {r} {b-h*0.22} {r} {my+h*0.12} "
+                f"C{r} {my} {mx+w*0.1} {my} {x+w*0.1} {y+h*0.38}"
+            ),
+
+
+            '7': (
+                f"M{x} {y} "
+                f"L{r} {y} "
+                f"L{x+w*0.2} {b}"
+            ),
+            '8': (
+                f"M{mx} {my} "
+                f"Q{x} {my} {x} {y+h*0.27} "
+                f"Q{x} {y} {mx} {y} "
+                f"Q{r} {y} {r} {y+h*0.27} "
+                f"Q{r} {my} {mx} {my} "
+                f"Q{x} {my} {x} {b-h*0.27} "
+                f"Q{x} {b} {mx} {b} "
+                f"Q{r} {b} {r} {b-h*0.27} "
+                f"Q{r} {my} {mx} {my}"
+            ),
+            '9': (
+                f"M{x} {b-h*0.15} "
+                f"C{x} {b} {mx} {b} {r-w*0.1} {b-h*0.32} "
+                f"C{r} {b-h*0.48} {r} {y} {mx} {y} "
+                f"C{x-w*0.05} {y} {x} {y+h*0.22} {x} {my-h*0.12} "
+                f"C{x} {my} {mx-w*0.1} {my} {r-w*0.1} {b-h*0.38}"
+            ),
+
+
+
+            '/': (
+                f"M{x} {b} L{r} {y}"
+            ),
+        }
+        return paths.get(char, '')
+
+    def _date_to_svg_paths(
+        self,
+        date_str: str,
+        x_start: float,
+        y: float,
+        char_w: float = 55,
+        char_h: float = 110,
+        spacing: float = 10,
+    ) -> List[str]:
+        #date_str ="01/23/456789" #DEBUG LINE - IGNORE
+        paths = []
+        x = x_start
+        for char in date_str:
+            d = self._digit_path(char, x, y, w=char_w, h=char_h)
+            if d:
+                paths.append(d)
+            x += char_w + spacing
+        return paths
+
+    def _add_date_strokes(
+        self,
+        strokes: List[_RawStroke],
+        image_shape: Tuple[int, int, int],
+    ) -> List[_RawStroke]:
+        if not self._last_signature_bbox:
+            return strokes
+
+        img_h, img_w = image_shape[:2]
+        sig_x0, sig_y0, sig_x1, sig_y1 = self._last_signature_bbox
+        sig_h = max(1, sig_y1 - sig_y0)
+
+        date_str = datetime.now().strftime("%d/%m/%Y")
+        char_h = max(14, int(sig_h * 0.35))
+        char_w = int(char_h * 0.5)
+        spacing = max(6, int(char_w * 0.2))
+        pad = max(6, int(sig_h * 0.2))
+
+        x_start = sig_x0
+        y = sig_y1 + pad
+        if y + char_h > img_h - pad:
+            y = max(pad, img_h - char_h - pad)
+
+        paths = self._date_to_svg_paths(
+            date_str,
+            x_start,
+            y,
+            char_w=char_w,
+            char_h=char_h,
+            spacing=spacing,
+        )
+        if not paths:
+            return strokes
+
+        path_nodes = "".join(f'<path d="{d}" />' for d in paths)
+        svg_text = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" '
+            f'viewBox="0 0 {img_w} {img_h}">'
+            f'{path_nodes}</svg>'
+        )
+
+        try:
+            date_strokes = svg_to_strokes.svg_to_strokes(svg_text)
+        except Exception:
+            return strokes
+
+        if not isinstance(date_strokes, list):
+            return strokes
+
+        placed: List[_RawStroke] = []
+        for stroke in date_strokes:
+            if not isinstance(stroke, list) or len(stroke) < 2:
+                continue
+            placed.append([
+                (int(round(x)), int(round(y)))
+                for x, y in stroke
+            ])
+
+        if not placed:
+            return strokes
+
+        return strokes + placed
+    
     def _add_signature_strokes(
         self,
         strokes: List[_RawStroke],
         image_shape: Tuple[int, int, int],
     ) -> List[_RawStroke]:
         if not self.signature_strokes:
+            self._last_signature_bbox = None
             return strokes
 
         img_h, img_w = image_shape[:2]
@@ -590,6 +766,7 @@ class PortraitProcessor:
         sig_w = max_x - min_x
         sig_h = max_y - min_y
         if sig_w <= 0 or sig_h <= 0:
+            self._last_signature_bbox = None
             return strokes
 
         max_w = int(img_w * self.signature_scale)
@@ -614,6 +791,13 @@ class PortraitProcessor:
             return sum(1 for px, py in points if x <= px <= x1 and y <= py <= y1)
 
         best_x, best_y = min(candidates, key=lambda pos: count_hits(pos[0], pos[1]))
+
+        self._last_signature_bbox = (
+            int(round(best_x)),
+            int(round(best_y)),
+            int(round(best_x + scaled_w)),
+            int(round(best_y + scaled_h)),
+        )
 
         placed: List[_RawStroke] = []
         for stroke in self.signature_strokes:

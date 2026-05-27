@@ -551,7 +551,7 @@ class MotionNode(Node):
         marker.type = Marker.LINE_STRIP
         marker.action = Marker.ADD
 
-        marker.scale.x = 0.003
+        marker.scale.x = 0.0006
 
         marker.color.r = 1.0
         marker.color.g = 1.0
